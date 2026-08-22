@@ -471,7 +471,7 @@ input::placeholder { color: #ada59d; }
 .inventory-form-meta .field-label, .inventory-search { display: grid; gap: 6px; }
 .inventory-search { margin-top: 2px; }
 .inventory-reader-card { overflow: hidden; background: linear-gradient(145deg, #fffdf8, #f7eee1); }
-.inventory-camera-tabs { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 6px; margin-bottom: 18px; padding: 5px; border-radius: 13px; background: #eee7db; }
++.inventory-camera-tabs { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 6px; margin-bottom: 18px; padding: 5px; border-radius: 13px; background: #eee7db; }
 .inventory-camera-tabs button { min-height: 40px; padding: 8px 10px; border: 0; border-radius: 9px; background: transparent; color: var(--navy); font-size: .69rem; font-weight: 850; cursor: pointer; }
 .inventory-camera-tabs button.active { background: var(--paper); color: var(--berry); box-shadow: 0 3px 10px rgba(68,43,28,.09); }
 .production-sheet-status, .production-sheet-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 14px; padding: 10px 12px; border: 1px solid #dccbb5; border-radius: 12px; background: rgba(255,255,255,.72); color: var(--navy); }
@@ -713,15 +713,6 @@ input::placeholder { color: #ada59d; }
           <p id="loginMessage" class="form-message" role="status"></p>
         </form>
 
-        <div class="demo-tools">
-          <button id="demoButton" class="demo-button" type="button">Explore manager demo</button>
-          <div class="demo-divider"><span>or</span></div>
-          <label class="employee-demo-label" for="employeeDemoSelect">Preview an employee portal</label>
-          <div class="employee-demo-row">
-            <select id="employeeDemoSelect" aria-label="Choose an employee for the demo"></select>
-            <button id="employeeDemoButton" class="demo-button employee-demo-button" type="button">Open employee demo</button>
-          </div>
-        </div>
         <p class="secure-note">Your PIN is protected by Supabase and is never stored in this website's code.</p>
       </section>
     </main>
@@ -1348,9 +1339,6 @@ window.staffEmailFromCode = function staffEmailFromCode(code) {
     loginPin: document.querySelector("#loginPin"),
     loginMessage: document.querySelector("#loginMessage"),
     togglePin: document.querySelector("#togglePin"),
-    demoButton: document.querySelector("#demoButton"),
-    employeeDemoSelect: document.querySelector("#employeeDemoSelect"),
-    employeeDemoButton: document.querySelector("#employeeDemoButton"),
     logoutButton: document.querySelector("#logoutButton"),
     toast: document.querySelector("#toast"),
     settings: document.querySelector("#scheduleSettings"),
@@ -3539,7 +3527,7 @@ window.staffEmailFromCode = function staffEmailFromCode(code) {
   async function handleLogin(event) {
     event.preventDefault();
     if (!supabaseClient) {
-      elements.loginMessage.textContent = "The login service did not load. The manager demo is still available.";
+      elements.loginMessage.textContent = "The login service did not load. Please refresh the page and try again.";
       return;
     }
     const code = elements.loginId.value.trim();
@@ -3577,7 +3565,6 @@ window.staffEmailFromCode = function staffEmailFromCode(code) {
   async function initialize() {
     const today = new Intl.DateTimeFormat("en-US", { weekday: "long", month: "long", day: "numeric" }).format(new Date());
     document.querySelector("#todayLabel").textContent = today;
-    elements.employeeDemoSelect.innerHTML = demoData.team.map((employee) => `<option value="${employee.id}" ${employee.id === "demo-gabriel" ? "selected" : ""}>${escapeHtml(employee.name)}</option>`).join("");
     if (!supabaseClient) return;
     const { data } = await supabaseClient.auth.getSession();
     if (data.session) await loadSupabaseApp(data.session);
@@ -3589,34 +3576,6 @@ window.staffEmailFromCode = function staffEmailFromCode(code) {
     elements.togglePin.textContent = showing ? "Show" : "Hide";
   });
   elements.loginForm.addEventListener("submit", handleLogin);
-  elements.demoButton.addEventListener("click", () => {
-    state.mode = "demo";
-    state.team = loadDemoTeam();
-    state.hiddenTeam = [];
-    state.settings = clone(demoData.defaultSettings);
-    state.options = [];
-    state.savedScheduleIds = {};
-    state.publishedOption = null;
-    state.publishedSchedule = null;
-    state.employeeAssignments = [];
-    openApp({ id: "demo-manager", display_name: "Manager", employee_code: "SWENSENSMANAGER", account_role: "manager" });
-    showToast("Manager demo opened");
-  });
-  elements.employeeDemoButton.addEventListener("click", () => {
-    state.mode = "demo";
-    state.team = loadDemoTeam();
-    state.hiddenTeam = [];
-    state.settings = clone(demoData.defaultSettings);
-    state.options = scheduler.generateOptions(state.team, state.settings, 5);
-    state.savedScheduleIds = {};
-    state.selectedOption = 0;
-    state.publishedOption = 0;
-    state.publishedSchedule = { week_start: state.settings.weekStart };
-    state.employeeAssignments = [];
-    const employee = state.team.find((item) => item.id === elements.employeeDemoSelect.value) || state.team[0];
-    openApp({ id: employee.id, display_name: employee.name, employee_code: employee.code, account_role: "employee", skills: employee.skills || [] });
-    showToast(`${employee.name}'s employee demo opened`);
-  });
   elements.logoutButton.addEventListener("click", closeApp);
   elements.showEmployeeAccountForm.addEventListener("click", () => {
     state.showingEmployeeAccountForm = !state.showingEmployeeAccountForm;

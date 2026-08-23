@@ -422,6 +422,79 @@ input::placeholder { color: #ada59d; }
 .manual-entry-notice p { margin: 4px 0 0; color: #6f604c; font-size: .68rem; line-height: 1.45; }
 .reusable-count-table input { border-color: #c9aa6f; background: #fffdf4; }
 .reusable-count-table input[data-current-count=""] { border-color: #d8cfc3; background: #fff; }
+.manual-master-sheet-scroll { max-height: 720px; }
+.manual-master-sheet-table { min-width: 1540px; }
+.manual-master-sheet-table thead { position: sticky; top: 0; z-index: 5; }
+.manual-master-sheet-table .manual-date-row th { padding: 4px; background: #f7f2ea; }
+.manual-master-sheet-table input { width: 58px; min-height: 31px; padding: 5px 4px; border: 1px solid #c9aa6f; border-radius: 6px; background: #fffdf4; font-size: .67rem; text-align: center; }
+.manual-master-sheet-table input[type="date"] { width: 120px; font-size: .61rem; }
+.manual-master-sheet-table .manual-ending-count input { width: 64px; color: var(--navy); font-size: .78rem; font-weight: 900; }
+.manual-half-counts { overflow: hidden; border: 1px solid var(--line); border-radius: 13px; background: #fbf7ef; }
+.manual-half-counts > summary { padding: 13px 14px; color: var(--navy); font-size: .72rem; font-weight: 850; cursor: pointer; }
+.manual-half-counts > p { margin: 0; padding: 0 14px 12px; color: var(--muted); font-size: .65rem; line-height: 1.45; }
+.manual-half-counts .inventory-paper-scroll { margin: 0 14px 14px; }
+.manual-sheet-footer > div { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.manual-mobile-editor { display: none; }
+.manual-grid-details { overflow: hidden; border: 1px solid var(--line); border-radius: 13px; background: #fbf7ef; }
+.manual-grid-details > summary { padding: 13px 14px; color: var(--navy); font-size: .72rem; font-weight: 850; cursor: pointer; }
+.manual-grid-details > .inventory-paper-scroll { border: 0; border-top: 1px solid var(--line); border-radius: 0; }
+
+@media (min-width: 760px) {
+  .manual-grid-details > summary { display: none; }
+  .manual-grid-details:not([open]) > .inventory-paper-scroll { display: block; }
+}
+
+@media (max-width: 759px) {
+  .inventory-opening-panel > summary { align-items: flex-start; padding: 15px; }
+  .inventory-opening-panel .inventory-collapsible-body { gap: 12px; padding: 0 12px 14px; }
+  .inventory-opening-panel .manual-entry-notice { margin-top: 12px; }
+  .manual-mobile-editor { display: grid; gap: 12px; }
+  .manual-mobile-toolbar { position: sticky; top: 69px; z-index: 12; display: grid; gap: 7px; margin-inline: -4px; padding: 8px; border: 1px solid #d8cbbd; border-radius: 14px; background: rgba(255,253,248,.97); box-shadow: 0 8px 22px rgba(68,43,28,.13); backdrop-filter: blur(12px); }
+  .manual-mobile-day-picker { display: grid; grid-template-columns: 32px minmax(0,1fr) 32px; gap: 5px; align-items: stretch; }
+  .manual-mobile-day-picker > div { display: grid; grid-template-columns: repeat(5,minmax(0,1fr)); gap: 4px; }
+  .manual-mobile-day-picker button { min-width: 0; min-height: 44px; padding: 5px 2px; border: 1px solid #d7ccc0; border-radius: 9px; background: #fff; color: var(--navy); font-weight: 850; cursor: pointer; }
+  .manual-mobile-day-picker button span, .manual-mobile-day-picker button small { display: block; }
+  .manual-mobile-day-picker button span { font-size: .72rem; }
+  .manual-mobile-day-picker button small { overflow: hidden; margin-top: 2px; color: var(--muted); font-size: .5rem; text-overflow: ellipsis; white-space: nowrap; }
+  .manual-mobile-day-picker button.active { border-color: var(--berry); background: var(--berry); color: #fff; box-shadow: 0 4px 12px rgba(174,19,53,.22); }
+  .manual-mobile-day-picker button.active small { color: #fff1f3; }
+  .manual-mobile-day-picker .manual-day-arrow { padding: 0; font-size: 1.4rem; }
+  .manual-mobile-day-picker .manual-day-arrow:disabled { opacity: .35; }
+  .manual-mobile-savebar { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
+  .manual-mobile-savebar button { width: 100%; min-height: 40px; }
+  .manual-mobile-day-panel { display: grid; gap: 12px; scroll-margin-top: 184px; }
+  .manual-mobile-day-panel[hidden] { display: none !important; }
+  .manual-mobile-date-card { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; padding: 13px; border: 1px solid #ddcdbb; border-radius: 15px; background: linear-gradient(145deg,#fffdf8,#f6ecdd); }
+  .manual-mobile-date-card > div { grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  .manual-mobile-date-card > div span { color: var(--muted); font-size: .59rem; font-weight: 850; letter-spacing: .06em; text-transform: uppercase; }
+  .manual-mobile-date-card > div strong { color: var(--berry); font-size: .75rem; }
+  .manual-mobile-date-card label { display: grid; gap: 5px; color: var(--muted); font-size: .58rem; font-weight: 850; }
+  .manual-mobile-date-card input { width: 100%; min-width: 0; min-height: 43px; padding: 8px; border: 1px solid #cdbb9d; border-radius: 9px; background: #fff; color: var(--navy); font-size: 1rem; }
+  .manual-mobile-groups { display: grid; gap: 11px; }
+  .manual-mobile-group { overflow: hidden; border: 1px solid var(--line); border-radius: 15px; background: #fffdfa; }
+  .manual-mobile-group > header { display: flex; align-items: center; justify-content: space-between; padding: 9px 11px; background: #eee4d6; color: var(--navy); }
+  .manual-mobile-group > header strong { font-size: .72rem; }
+  .manual-mobile-group > header span { color: var(--muted); font-size: .58rem; font-weight: 850; }
+  .manual-mobile-flavor-row { display: grid; grid-template-columns: minmax(0,1fr) 73px 73px; gap: 7px; align-items: end; min-height: 69px; padding: 10px; border-top: 1px solid #eee7dc; }
+  .manual-mobile-group > div > .manual-mobile-flavor-row:first-child { border-top: 0; }
+  .manual-mobile-flavor-name { min-width: 0; align-self: center; }
+  .manual-mobile-flavor-name strong { display: block; color: #3f3934; font-size: .7rem; line-height: 1.25; }
+  .manual-mobile-flavor-name small { display: block; margin-top: 3px; color: var(--muted); font-size: .54rem; }
+  .manual-mobile-flavor-row label { display: grid; gap: 4px; color: var(--muted); font-size: .5rem; font-weight: 850; text-align: center; }
+  .manual-mobile-flavor-row input { width: 100%; min-width: 0; min-height: 43px; padding: 6px 4px; border: 1px solid #c9aa6f; border-radius: 9px; background: #fffdf4; color: var(--navy); font-size: 1rem; font-weight: 850; text-align: center; }
+  .manual-mobile-flavor-row .inventory-not-tracked { min-height: 43px; display: grid; place-items: center; border-radius: 9px; background: #f0ece7; }
+  .manual-mobile-counts { background: #fffdfa; }
+  .manual-mobile-count-list { display: grid; gap: 10px; padding: 0 12px 12px; }
+  .manual-mobile-count-list .inventory-group { border-radius: 12px; }
+  .manual-mobile-count-row { display: grid; grid-template-columns: minmax(0,1fr) 82px; gap: 10px; align-items: center; min-height: 52px; padding: 7px 10px; border-top: 1px solid #eee7dc; }
+  .manual-mobile-count-list .inventory-group-rows > .manual-mobile-count-row:first-child { border-top: 0; }
+  .manual-mobile-count-row span { color: #403a35; font-size: .68rem; font-weight: 750; }
+  .manual-mobile-count-row input { width: 82px; min-height: 40px; padding: 6px; border: 1px solid #c9aa6f; border-radius: 9px; background: #fffdf4; color: var(--navy); font-size: 1rem; font-weight: 850; text-align: center; }
+  .manual-grid-details { display: block; }
+  .manual-grid-details > summary { min-height: 46px; display: flex; align-items: center; justify-content: space-between; }
+  .manual-grid-details > summary::after { content: "Optional"; color: var(--muted); font-size: .56rem; letter-spacing: .05em; text-transform: uppercase; }
+  .manual-sheet-footer { display: none; }
+}
 .inventory-add-flavor-form { display: grid; gap: 10px; margin-top: 16px; padding: 14px; border: 1px solid var(--line); border-radius: 14px; background: #fbf7ef; }
 .inventory-add-flavor-form .field-label { display: grid; gap: 6px; }
 .inventory-half-checkbox { display: flex; align-items: center; gap: 8px; color: #554e48; font-size: .71rem; font-weight: 750; }
@@ -1941,29 +2014,118 @@ window.staffEmailFromCode = function staffEmailFromCode(code) {
     return `<input type="number" min="0" max="999" inputmode="numeric" data-opening-count="${flavor.id}" data-opening-kind="${kind}" data-current-count="${currentCount}" value="${currentCount}" placeholder="—" aria-label="Exact ${inventoryKindLabel(kind)} count for ${escapeHtml(flavor.name)}">`;
   }
 
+  function manualSheetDateInput(slot, kind, slotIndex) {
+    const value = kind === "can" ? slot?.can_date : slot?.half_gallon_date;
+    return `<input type="date" data-manual-sheet-date="${kind}" data-slot-number="${slotIndex + 1}" value="${value || ""}" aria-label="${kind === "can" ? "Can" : "Half-gallon"} production date ${slotIndex + 1}">`;
+  }
+
+  function manualSheetCellInput(slot, flavor, kind, slotIndex) {
+    if (kind === "half_gallon" && !flavor.tracksHalfGallons) {
+      return `<span class="inventory-not-tracked" aria-label="Not tracked">—</span>`;
+    }
+    const cell = productionSheetCell(slot, flavor.id);
+    const quantity = kind === "can" ? cell?.can_quantity : cell?.half_gallon_quantity;
+    const value = Number(quantity) > 0 ? Number(quantity) : "";
+    return `<input type="number" min="0" max="999" inputmode="numeric" data-manual-sheet-cell="${flavor.id}" data-manual-sheet-kind="${kind}" data-slot-number="${slotIndex + 1}" value="${value}" placeholder="" aria-label="${kind === "can" ? "Cans" : "Half gallons"} of ${escapeHtml(flavor.name)} made in column ${slotIndex + 1}">`;
+  }
+
+  function manualMobileDayLabel(slot, slotIndex) {
+    const date = slot.can_date || slot.half_gallon_date;
+    return date ? inventoryShortDate(date) : `Day ${slotIndex + 1}`;
+  }
+
+  function renderManualMobileDay(slot, slotIndex) {
+    const groups = Object.entries(inventoryCategoryLabels).map(([category, label]) => {
+      const flavors = state.inventoryFlavors.filter((flavor) => flavor.category === category);
+      if (!flavors.length) return "";
+      return `<section class="manual-mobile-group">
+        <header><strong>${label}</strong><span>${flavors.length}</span></header>
+        <div>${flavors.map((flavor) => `<article class="manual-mobile-flavor-row">
+          <div class="manual-mobile-flavor-name"><strong>${escapeHtml(flavor.name)}</strong><small>Current cans: ${Number.isInteger(flavor.canCount) ? flavor.canCount : "not set"}</small></div>
+          <label><span>Cans made</span>${manualSheetCellInput(slot, flavor, "can", slotIndex)}</label>
+          <label><span>½ gal made</span>${manualSheetCellInput(slot, flavor, "half_gallon", slotIndex)}</label>
+        </article>`).join("")}</div>
+      </section>`;
+    }).join("");
+    return `<section class="manual-mobile-day-panel" data-manual-mobile-day-panel="${slotIndex}" ${slotIndex ? "hidden" : ""}>
+      <div class="manual-mobile-date-card">
+        <div><span>Production day</span><strong>Day ${slotIndex + 1} of 5</strong></div>
+        <label><span>Can date</span>${manualSheetDateInput(slot, "can", slotIndex)}</label>
+        <label><span>½-gallon date</span>${manualSheetDateInput(slot, "half_gallon", slotIndex)}</label>
+      </div>
+      <div class="manual-mobile-groups">${groups}</div>
+    </section>`;
+  }
+
+  function renderManualMobileCanCounts() {
+    return `<details class="manual-half-counts manual-mobile-counts">
+      <summary>Correct ending can totals</summary>
+      <p>Only open this if the calculated can total does not match the physical master list.</p>
+      <div class="manual-mobile-count-list">${inventoryGroupedMarkup(state.inventoryFlavors, (flavor) => `<label class="manual-mobile-count-row"><span>${escapeHtml(flavor.name)}</span>${openingCountInput(flavor, "can")}</label>`)}</div>
+    </details>`;
+  }
+
   function renderOpeningCountForm(missingUnitCount) {
-    const totalUnits = state.inventoryFlavors.length + state.inventoryFlavors.filter((flavor) => flavor.tracksHalfGallons).length;
+    const sheet = activeProductionSheet();
+    const slots = productionSheetSlots(sheet);
     const complete = missingUnitCount === 0;
     const summary = complete
-      ? "Open this whenever you need to replace a calculated total with a physical count."
-      : `${missingUnitCount} starting count${missingUnitCount === 1 ? " is" : "s are"} still needed. Saved numbers can also be corrected here.`;
+      ? "Edit the same five-day grid as the paper sheet, including dates, production, and exact physical totals."
+      : `${missingUnitCount} starting count${missingUnitCount === 1 ? " is" : "s are"} still needed. Dates and production columns can also be rebuilt here.`;
     return `<details class="panel inventory-collapsible inventory-opening-panel">
-      <summary><span><strong>Starting counts & manual corrections</strong><small>${summary}</small></span><span class="collapsible-summary-status"><b>${totalUnits - missingUnitCount} / ${totalUnits}</b><i class="collapsible-arrow" aria-hidden="true">⌄</i></span></summary>
+      <summary><span><strong>Full master-sheet editor</strong><small>${summary}</small></span><span class="collapsible-summary-status"><b>Sheet #${sheet?.sheet_number || 1}</b><i class="collapsible-arrow" aria-hidden="true">⌄</i></span></summary>
       <div class="inventory-collapsible-body">
-        <div class="manual-entry-notice"><strong>Reusable exact-count editor</strong><p>Blank cells create the first starting count. Changing a saved number creates a special <em>Manual physical count</em> log—not a production or usage calculation.</p></div>
-        <form id="openingCountsForm" class="inventory-count-form">
+        <div class="manual-entry-notice"><strong>Matches the paper master list</strong><p>Edit all five can dates, all five ½-gallon dates, every made quantity, and the ending physical counts. Manual count changes receive a special audit entry and are never mistaken for an automatic calculation.</p></div>
+        <form id="manualMasterSheetForm" class="inventory-count-form">
           <div class="inventory-form-meta">
-            <label class="field-label">Physical count date<input name="occurredOn" type="date" value="${inventoryDateValue()}" required></label>
-            <label class="field-label">Reason for correction<input name="note" maxlength="500" placeholder="Required only when changing a saved number"></label>
+            <label class="field-label">Reason / paper record note<input name="note" maxlength="500" placeholder="Example: Entered completed paper sheet from 8/12–8/20"></label>
           </div>
-          <div class="inventory-paper-scroll opening-count-scroll">
-            <table class="inventory-paper-table opening-count-table reusable-count-table">
-              <caption>Starting and corrected physical counts for full cans and half gallons</caption>
-              <thead><tr><th scope="col">Flavors</th><th scope="col">Cans</th><th scope="col">½ Gallons</th></tr></thead>
-              <tbody>${inventoryPaperRows(state.inventoryFlavors, 3, (flavor) => `<tr><th scope="row">${escapeHtml(flavor.name)}</th><td>${openingCountInput(flavor, "can")}</td><td>${openingCountInput(flavor, "half_gallon")}</td></tr>`)}</tbody>
-            </table>
+          <div class="manual-mobile-editor">
+            <div class="manual-mobile-toolbar">
+              <div class="manual-mobile-day-picker" aria-label="Choose production day">
+                <button type="button" class="manual-day-arrow" data-manual-mobile-step="-1" disabled aria-label="Previous production day">‹</button>
+                <div>${slots.map((slot, index) => `<button type="button" data-manual-mobile-day="${index}" class="${index === 0 ? "active" : ""}" ${index === 0 ? 'aria-current="step"' : ""}><span>${index + 1}</span><small>${manualMobileDayLabel(slot, index)}</small></button>`).join("")}</div>
+                <button type="button" class="manual-day-arrow" data-manual-mobile-step="1" aria-label="Next production day">›</button>
+              </div>
+              <div class="manual-mobile-savebar">
+                <button class="secondary-button compact" type="submit" name="sheetAction" value="save" ${state.inventoryBusy ? "disabled" : ""}>Save draft</button>
+                <button class="primary-button compact" type="submit" name="sheetAction" value="archive" ${state.inventoryBusy ? "disabled" : ""}>Archive sheet</button>
+              </div>
+            </div>
+            ${slots.map(renderManualMobileDay).join("")}
+            ${renderManualMobileCanCounts()}
           </div>
-          <div class="inventory-form-footer"><p>Enter zero for an empty flavor. Only new or changed numbers will be saved.</p><button class="primary-button compact" type="submit" ${state.inventoryBusy ? "disabled" : ""}>Save starting counts / corrections</button></div>
+          <details class="manual-grid-details">
+            <summary>View all 5 days in one wide table</summary>
+            <div class="inventory-paper-scroll manual-master-sheet-scroll">
+              <table class="inventory-paper-table production-master-sheet manual-master-sheet-table reusable-count-table">
+                <caption>Editable five-day production master sheet with exact ending can counts</caption>
+                <thead>
+                  <tr><th scope="col">Flavors</th><th scope="col">Cans</th><th colspan="5" scope="colgroup">Can production dates</th><th scope="col" class="half-gallon-divider">½ Gallons</th><th colspan="5" scope="colgroup">½-gallon production dates</th></tr>
+                  <tr class="manual-date-row"><th></th><th></th>${slots.map((slot, index) => `<th>${manualSheetDateInput(slot, "can", index)}</th>`).join("")}<th class="half-gallon-divider"></th>${slots.map((slot, index) => `<th>${manualSheetDateInput(slot, "half_gallon", index)}</th>`).join("")}</tr>
+                </thead>
+                <tbody>${inventoryPaperRows(state.inventoryFlavors, 13, (flavor) => `<tr>
+                  <th scope="row">${escapeHtml(flavor.name)}</th>
+                  <td class="manual-ending-count">${openingCountInput(flavor, "can")}</td>
+                  ${slots.map((slot, index) => `<td>${manualSheetCellInput(slot, flavor, "can", index)}</td>`).join("")}
+                  <td class="half-gallon-divider"></td>
+                  ${slots.map((slot, index) => `<td>${manualSheetCellInput(slot, flavor, "half_gallon", index)}</td>`).join("")}
+                </tr>`)}</tbody>
+              </table>
+            </div>
+          </details>
+          <details class="manual-half-counts">
+            <summary>Correct current ½-gallon totals</summary>
+            <p>The paper production grid above records what was made. This smaller table matches the separate physical ½-gallon count list.</p>
+            <div class="inventory-paper-scroll opening-count-scroll">
+              <table class="inventory-paper-table opening-count-table reusable-count-table">
+                <caption>Corrected physical half-gallon counts</caption>
+                <thead><tr><th scope="col">Flavors</th><th scope="col">Current ½ Gallons</th></tr></thead>
+                <tbody>${inventoryPaperRows(state.inventoryFlavors.filter((flavor) => flavor.tracksHalfGallons), 2, (flavor) => `<tr><th scope="row">${escapeHtml(flavor.name)}</th><td>${openingCountInput(flavor, "half_gallon")}</td></tr>`)}</tbody>
+              </table>
+            </div>
+          </details>
+          <div class="inventory-form-footer manual-sheet-footer"><p>Use 0 for an empty flavor. “Save sheet” keeps it active; “Save & archive” freezes all five days, adds it to Past Master Sheets, and opens a new blank sheet.</p><div><button class="secondary-button compact" type="submit" name="sheetAction" value="save" ${state.inventoryBusy ? "disabled" : ""}>Save sheet</button><button class="primary-button compact" type="submit" name="sheetAction" value="archive" ${state.inventoryBusy ? "disabled" : ""}>Save & archive 5-day sheet</button></div></div>
         </form>
       </div>
     </details>`;
@@ -2290,7 +2452,7 @@ window.staffEmailFromCode = function staffEmailFromCode(code) {
     const latest = state.inventoryHistory[0];
     elements.inventory.innerHTML = `
       <div class="inventory-summary-grid">
-        <article><span>Total full cans</span><strong>${missingCans.length ? "—" : totalCans}</strong><small>${missingCans.length ? `${missingCans.length} opening counts needed` : "Across all 40 flavors"}</small></article>
+        <article><span>Total full cans</span><strong>${missingCans.length ? "—" : totalCans}</strong><small>${missingCans.length ? `${missingCans.length} opening counts needed` : `Across all ${state.inventoryFlavors.length} flavors`}</small></article>
         <article><span>Total ½ gallons</span><strong>${missingHalfGallons.length ? "—" : totalHalfGallons}</strong><small>${missingHalfGallons.length ? `${missingHalfGallons.length} opening counts needed` : `Across ${halfFlavors.length} tracked flavors`}</small></article>
         <article><span>Opening setup</span><strong>${missingUnitCount ? "In progress" : "Complete"}</strong><small>${missingUnitCount ? `${missingUnitCount} counts still needed` : "Both master lists are ready"}</small></article>
         <article><span>Last worked on</span><strong class="inventory-last-worked">${latest ? inventoryTimestampLabel(latest.created_at) : "—"}</strong><small>${latest ? `By ${escapeHtml(latest.created_by_name)}` : "No changes recorded yet"}</small></article>
@@ -2404,50 +2566,119 @@ window.staffEmailFromCode = function staffEmailFromCode(code) {
     return true;
   }
 
-  async function saveOpeningCounts(form) {
-    const changedInputs = [...form.querySelectorAll("[data-opening-count]")].filter((input) => (
-      input.value !== "" && (input.dataset.currentCount === "" || Number(input.value) !== Number(input.dataset.currentCount))
-    ));
-    const openingItems = changedInputs.filter((input) => input.dataset.currentCount === "").map((input) => ({
-      flavor_id: input.dataset.openingCount,
-      inventory_kind: input.dataset.openingKind,
-      quantity: Number(input.value),
-    }));
-    const correctionItems = changedInputs.filter((input) => input.dataset.currentCount !== "").map((input) => ({
-      flavor_id: input.dataset.openingCount,
-      inventory_kind: input.dataset.openingKind,
-      quantity: Number(input.value),
-    }));
-    if (!openingItems.length && !correctionItems.length) {
-      showToast("Change at least one count before saving.");
+  function manualSheetDates(form, kind) {
+    const values = [null, null, null, null, null];
+    form.querySelectorAll(`[data-manual-sheet-date="${kind}"]`).forEach((input) => {
+      values[Number(input.dataset.slotNumber) - 1] = input.value || null;
+    });
+    return values;
+  }
+
+  function syncManualMasterInput(input) {
+    const form = input.closest("#manualMasterSheetForm");
+    if (!form) return;
+    if (input.matches("[data-manual-sheet-date]")) {
+      form.querySelectorAll("[data-manual-sheet-date]").forEach((other) => {
+        if (other !== input && other.dataset.manualSheetDate === input.dataset.manualSheetDate && other.dataset.slotNumber === input.dataset.slotNumber) other.value = input.value;
+      });
+    } else if (input.matches("[data-manual-sheet-cell]")) {
+      form.querySelectorAll("[data-manual-sheet-cell]").forEach((other) => {
+        if (other !== input && other.dataset.manualSheetCell === input.dataset.manualSheetCell && other.dataset.manualSheetKind === input.dataset.manualSheetKind && other.dataset.slotNumber === input.dataset.slotNumber) other.value = input.value;
+      });
+    } else if (input.matches("[data-opening-count]")) {
+      form.querySelectorAll("[data-opening-count]").forEach((other) => {
+        if (other !== input && other.dataset.openingCount === input.dataset.openingCount && other.dataset.openingKind === input.dataset.openingKind) other.value = input.value;
+      });
+    }
+  }
+
+  function selectManualMobileDay(form, nextIndex) {
+    const index = Math.max(0, Math.min(4, Number(nextIndex) || 0));
+    form.querySelectorAll("[data-manual-mobile-day-panel]").forEach((panel) => {
+      panel.hidden = Number(panel.dataset.manualMobileDayPanel) !== index;
+    });
+    form.querySelectorAll("[data-manual-mobile-day]").forEach((button) => {
+      const active = Number(button.dataset.manualMobileDay) === index;
+      button.classList.toggle("active", active);
+      if (active) button.setAttribute("aria-current", "step");
+      else button.removeAttribute("aria-current");
+    });
+    form.querySelector('[data-manual-mobile-step="-1"]')?.toggleAttribute("disabled", index === 0);
+    form.querySelector('[data-manual-mobile-step="1"]')?.toggleAttribute("disabled", index === 4);
+    form.querySelector(`[data-manual-mobile-day-panel="${index}"]`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  async function saveManualMasterSheet(form, action) {
+    const sheet = activeProductionSheet();
+    if (!sheet || state.inventoryBusy) return;
+    if (state.mode !== "supabase") {
+      showToast("Sign in to update the live master sheet.");
       return;
     }
-    const occurredOn = form.elements.occurredOn.value;
-    const correctionNote = form.elements.note.value.trim();
-    if (correctionItems.length && !correctionNote) {
-      showToast("Add a reason for the manual correction.");
+
+    const canDates = manualSheetDates(form, "can");
+    const halfDates = manualSheetDates(form, "half_gallon");
+    const cells = new Map();
+    form.querySelectorAll("[data-manual-sheet-cell]").forEach((input) => {
+      const key = `${input.dataset.manualSheetCell}:${input.dataset.slotNumber}`;
+      const row = cells.get(key) || {
+        flavor_id: input.dataset.manualSheetCell,
+        slot_number: Number(input.dataset.slotNumber),
+        can_quantity: 0,
+        half_gallon_quantity: 0,
+      };
+      if (input.dataset.manualSheetKind === "can") row.can_quantity = Number(input.value || 0);
+      else row.half_gallon_quantity = Number(input.value || 0);
+      cells.set(key, row);
+    });
+
+    const countsByFlavor = new Map();
+    form.querySelectorAll("[data-opening-count]").forEach((input) => {
+      const row = countsByFlavor.get(input.dataset.openingCount) || {
+        flavor_id: input.dataset.openingCount,
+        can_count: null,
+        half_gallon_count: null,
+      };
+      const value = input.value === "" ? null : Number(input.value);
+      if (input.dataset.openingKind === "can") row.can_count = value;
+      else row.half_gallon_count = value;
+      countsByFlavor.set(input.dataset.openingCount, row);
+    });
+
+    const changedCount = [...form.querySelectorAll("[data-opening-count]")].some((input) => (
+      input.value !== "" && (input.dataset.currentCount === "" || Number(input.value) !== Number(input.dataset.currentCount))
+    ));
+    const note = form.elements.note.value.trim();
+    if (changedCount && !note) {
+      showToast("Add a reason for the manual count correction.");
       form.elements.note.focus();
       return;
     }
-    if (openingItems.length) {
-      const saved = await applyInventoryBatch(
-        "opening",
-        occurredOn,
-        "Starting physical inventory",
-        openingItems,
-        correctionItems.length ? "New starting counts saved." : "Starting counts saved.",
-      );
-      if (!saved) return;
+    const complete = action === "archive";
+    if (complete && !window.confirm(`Save and archive master sheet #${sheet.sheet_number}? This freezes the five production days and opens a new blank sheet.`)) return;
+
+    const archivedSheetId = sheet.id;
+    state.inventoryBusy = true;
+    renderInventory();
+    const { error } = await supabaseClient.rpc("save_manual_ice_cream_master_sheet", {
+      p_sheet_id: sheet.id,
+      p_can_dates: canDates,
+      p_half_gallon_dates: halfDates,
+      p_cells: [...cells.values()],
+      p_counts: [...countsByFlavor.values()],
+      p_note: note,
+      p_complete: complete,
+    });
+    state.inventoryBusy = false;
+    if (error) {
+      renderInventory();
+      showToast(error.message);
+      return;
     }
-    if (correctionItems.length) {
-      await applyInventoryBatch(
-        "manual_recount",
-        occurredOn,
-        correctionNote,
-        correctionItems,
-        "Manual correction saved and specially logged.",
-      );
-    }
+    await loadInventoryData();
+    if (complete) state.productionSheetViewId = archivedSheetId;
+    renderInventory();
+    showToast(complete ? "Master sheet archived. A new blank sheet is ready." : "Full master-sheet corrections saved and logged.");
   }
 
   async function saveManualProduction(form, rawItems) {
@@ -3726,6 +3957,20 @@ window.staffEmailFromCode = function staffEmailFromCode(code) {
   document.querySelector("#generateButtonTop").addEventListener("click", generateSchedules);
 
   document.addEventListener("click", (event) => {
+    const manualDayButton = event.target.closest("[data-manual-mobile-day]");
+    if (manualDayButton) {
+      selectManualMobileDay(manualDayButton.closest("#manualMasterSheetForm"), manualDayButton.dataset.manualMobileDay);
+      return;
+    }
+
+    const manualDayStep = event.target.closest("[data-manual-mobile-step]");
+    if (manualDayStep) {
+      const form = manualDayStep.closest("#manualMasterSheetForm");
+      const current = Number(form.querySelector("[data-manual-mobile-day].active")?.dataset.manualMobileDay || 0);
+      selectManualMobileDay(form, current + Number(manualDayStep.dataset.manualMobileStep));
+      return;
+    }
+
     const dayOffButton = event.target.closest("[data-day-off]");
     if (dayOffButton) {
       const form = dayOffButton.closest("#requestForm");
@@ -3920,6 +4165,7 @@ window.staffEmailFromCode = function staffEmailFromCode(code) {
   });
 
   document.addEventListener("change", (event) => {
+    if (event.target.matches("[data-manual-sheet-date], [data-manual-sheet-cell], [data-opening-count]")) syncManualMasterInput(event.target);
     const requestForm = event.target.closest("#requestForm");
     if (requestForm) {
       const dayRow = event.target.closest("[data-availability-day]");
@@ -3968,6 +4214,7 @@ window.staffEmailFromCode = function staffEmailFromCode(code) {
   });
 
   document.addEventListener("input", (event) => {
+    if (event.target.matches("[data-manual-sheet-date], [data-manual-sheet-cell], [data-opening-count]")) syncManualMasterInput(event.target);
     const requestForm = event.target.closest("#requestForm");
     if (requestForm && (event.target.name === "minDays" || event.target.name === "maxDays")) {
       renderAvailabilityPreview(requestForm);
@@ -3998,9 +4245,9 @@ window.staffEmailFromCode = function staffEmailFromCode(code) {
       event.preventDefault();
       updateEmployeeSkills(event.target);
     }
-    if (event.target.id === "openingCountsForm") {
+    if (event.target.id === "manualMasterSheetForm") {
       event.preventDefault();
-      saveOpeningCounts(event.target);
+      saveManualMasterSheet(event.target, event.submitter?.value || "save");
     }
     if (event.target.id === "inventoryEntryForm") {
       event.preventDefault();

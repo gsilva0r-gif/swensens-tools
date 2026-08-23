@@ -12,6 +12,7 @@
     <meta property="og:image" content="https://swensens-management-hub.gsilva0r-sf.chatgpt.site/og.png" />
     <meta name="twitter:card" content="summary_large_image" />
     <title>Swensen's Management Hub</title>
+
     <style>
 :root {
   --berry: #9f1833;
@@ -471,7 +472,7 @@ input::placeholder { color: #ada59d; }
 .inventory-form-meta .field-label, .inventory-search { display: grid; gap: 6px; }
 .inventory-search { margin-top: 2px; }
 .inventory-reader-card { overflow: hidden; background: linear-gradient(145deg, #fffdf8, #f7eee1); }
-+.inventory-camera-tabs { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 6px; margin-bottom: 18px; padding: 5px; border-radius: 13px; background: #eee7db; }
+.inventory-camera-tabs { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 6px; margin-bottom: 18px; padding: 5px; border-radius: 13px; background: #eee7db; }
 .inventory-camera-tabs button { min-height: 40px; padding: 8px 10px; border: 0; border-radius: 9px; background: transparent; color: var(--navy); font-size: .69rem; font-weight: 850; cursor: pointer; }
 .inventory-camera-tabs button.active { background: var(--paper); color: var(--berry); box-shadow: 0 3px 10px rgba(68,43,28,.09); }
 .production-sheet-status, .production-sheet-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 14px; padding: 10px 12px; border: 1px solid #dccbb5; border-radius: 12px; background: rgba(255,255,255,.72); color: var(--navy); }
@@ -480,6 +481,16 @@ input::placeholder { color: #ada59d; }
 .production-sheet-toolbar { flex-wrap: wrap; margin: 0 0 14px; }
 .production-sheet-toolbar label { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: .62rem; font-weight: 850; text-transform: uppercase; }
 .production-sheet-toolbar select { min-height: 36px; padding: 6px 30px 6px 9px; border: 1px solid #cec2b5; border-radius: 9px; background: white; color: var(--navy); font-size: .67rem; font-weight: 750; }
+.production-sheet-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 7px; }
+.production-archive-panel { display: grid; gap: 13px; }
+.production-archive-list { display: grid; gap: 10px; }
+.production-archive-card { display: grid; gap: 13px; padding: 14px; border: 1px solid var(--line); border-radius: 15px; background: #fffdfa; }
+.production-archive-card > div:first-child { display: grid; gap: 5px; }
+.production-archive-card strong { color: var(--navy); font-family: Georgia, serif; font-size: .92rem; }
+.production-archive-card p { margin: 0; color: #514b46; font-size: .7rem; }
+.production-archive-card small { color: var(--muted); font-size: .63rem; line-height: 1.4; }
+.production-archive-actions { display: flex; flex-wrap: wrap; gap: 7px; }
+.inventory-history-type.archive { background: #e3eee8; color: #2f684a; }
 .production-preview-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .production-preview-heading > div { display: grid; gap: 3px; }
 .production-preview-heading strong { color: var(--navy); font-size: .82rem; }
@@ -600,6 +611,8 @@ input::placeholder { color: #ada59d; }
   .inventory-mode-tabs { grid-template-columns: repeat(3, 1fr); }
   .inventory-master-heading { grid-template-columns: minmax(0,1fr) minmax(250px,.55fr); align-items: end; }
   .inventory-add-flavor-form { grid-template-columns: minmax(180px,1.3fr) minmax(150px,.8fr) minmax(180px,1fr) auto; align-items: end; }
+  .production-archive-card { grid-template-columns: minmax(0,1fr) auto; align-items: center; }
+  .production-archive-actions { justify-content: flex-end; }
   .inventory-catalog-row { grid-template-columns: minmax(0,1fr) auto; align-items: center; }
   .inventory-scan-capture { grid-template-columns: minmax(0,1.35fr) minmax(220px,.65fr); }
   .inventory-scan-confirm-grid { grid-template-columns: minmax(0,1.15fr) minmax(250px,.85fr); align-items: start; }
@@ -659,9 +672,9 @@ input::placeholder { color: #ada59d; }
 
 @media print {
   @page { size: landscape; margin: .28in; }
-  body.printing-schedule { min-height: 0; background: white; }
-  body.printing-schedule > *:not(#printScheduleRoot) { display: none !important; }
-  body.printing-schedule #printScheduleRoot { display: block !important; }
+  body.printing-schedule, body.printing-inventory { min-height: 0; background: white; }
+  body.printing-schedule > *:not(#printScheduleRoot), body.printing-inventory > *:not(#printScheduleRoot) { display: none !important; }
+  body.printing-schedule #printScheduleRoot, body.printing-inventory #printScheduleRoot { display: block !important; }
   body.printing-schedule .schedule-sheet-wrap { overflow: visible; border: 1px solid #333; border-radius: 0; }
   body.printing-schedule .schedule-sheet { width: 100%; min-width: 0; table-layout: fixed; }
   body.printing-schedule .schedule-sheet caption { padding: 5px 7px; border-color: #333; font-size: 8pt; }
@@ -673,6 +686,19 @@ input::placeholder { color: #ada59d; }
   body.printing-schedule .sheet-entry { margin: 1px auto; padding: 1px 2px; border-radius: 2px; }
   body.printing-schedule .schedule-legend { margin-top: 5px; font-size: 6pt; }
   body.printing-schedule * { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+  body.printing-inventory .print-document > header { margin-bottom: 4px; }
+  body.printing-inventory .archive-print-scroll { overflow: visible; border: 1px solid #333; border-radius: 0; }
+  body.printing-inventory .archive-print-table { width: 100%; min-width: 0; table-layout: fixed; }
+  body.printing-inventory .archive-print-table caption { display: none; }
+  body.printing-inventory .archive-print-table th,
+  body.printing-inventory .archive-print-table td { height: .14in; padding: 1px 2px; border-color: #444; font-size: 5.1pt; line-height: 1; }
+  body.printing-inventory .archive-print-table thead th { height: .2in; font-size: 5pt; }
+  body.printing-inventory .archive-print-table th:first-child { position: static; width: 1.55in; }
+  body.printing-inventory .archive-print-table th:nth-child(2) { width: .42in; }
+  body.printing-inventory .archive-print-table .half-gallon-divider { width: .55in; }
+  body.printing-inventory .archive-print-table .inventory-paper-category th { height: .12in; padding: 1px 3px; font-size: 4.7pt; }
+  body.printing-inventory .inventory-print-document footer { margin-top: 4px; color: #444; font-size: 5.5pt; text-align: right; }
+  body.printing-inventory * { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -864,7 +890,8 @@ window.staffEmailFromCode = function staffEmailFromCode(code) {
   return cleaned ? cleaned + "@" + window.SWENSENS_CONFIG.staffEmailDomain : "";
 };
 
-
+    </script>
+    <script>
 (function () {
   const days = [
     { name: "Tuesday", short: "Tue", number: 2, amNeed: 2, pmNeed: 3 },
@@ -997,7 +1024,8 @@ window.staffEmailFromCode = function staffEmailFromCode(code) {
   };
 })();
 
-
+    </script>
+    <script>
 (function () {
   function combinations(items, count, start = 0, chosen = [], results = []) {
     if (chosen.length === count) {
@@ -1322,7 +1350,8 @@ window.staffEmailFromCode = function staffEmailFromCode(code) {
   window.SwensensScheduler = { generateOptions };
 })();
 
-
+    </script>
+    <script>
 (function () {
   const config = window.SWENSENS_CONFIG;
   const demoData = window.SWENSENS;
@@ -1563,6 +1592,67 @@ window.staffEmailFromCode = function staffEmailFromCode(code) {
     window.requestAnimationFrame(() => window.print());
   }
 
+  function buildProductionPrintTable(sheet) {
+    const slots = productionSheetSlots(sheet);
+    const flavors = productionSheetFlavors(sheet);
+    const productionCell = (slot, flavor, kind) => {
+      const cell = productionSheetCell(slot, flavor.id);
+      const value = kind === "can" ? cell?.can_quantity : cell?.half_gallon_quantity;
+      return `<td>${Number(value) > 0 ? value : ""}</td>`;
+    };
+    return `<div class="inventory-paper-scroll archive-print-scroll"><table class="inventory-paper-table production-master-sheet archive-print-table">
+      <caption>Archived full-can and half-gallon production master sheet</caption>
+      <thead><tr><th scope="col">Flavors</th><th scope="col">Cans</th>${slots.map((slot) => `<th scope="col">${inventoryShortDate(slot.can_date)}</th>`).join("")}<th scope="col" class="half-gallon-divider">½ Gallons</th>${slots.map((slot) => `<th scope="col">${inventoryShortDate(slot.half_gallon_date)}</th>`).join("")}</tr></thead>
+      <tbody>${inventoryPaperRows(flavors, 13, (flavor) => `<tr><th scope="row">${escapeHtml(flavor.name)}</th><td class="inventory-current-count">${Number.isInteger(flavor.canCount) ? flavor.canCount : "—"}</td>${slots.map((slot) => productionCell(slot, flavor, "can")).join("")}<td class="half-gallon-divider"></td>${slots.map((slot) => productionCell(slot, flavor, "half_gallon")).join("")}</tr>`)}</tbody>
+    </table></div>`;
+  }
+
+  function printProductionSheet(sheetId) {
+    const sheet = state.productionSheets.find((item) => item.id === sheetId);
+    if (!sheet) return;
+    const totals = productionSheetTotals(sheet);
+    const printRoot = document.querySelector("#printScheduleRoot");
+    printRoot.innerHTML = `<section class="print-document inventory-print-document"><header><p>Swensen's Ice Cream · San Francisco</p><h1>Production Master Sheet #${sheet.sheet_number}</h1><span>${productionSheetDateRange(sheet)} · ${sheet.status === "complete" ? "Archived record" : "Current sheet"} · ${totals.cans} cans / ${totals.halfGallons} half gallons made</span></header>${buildProductionPrintTable(sheet)}<footer>Generated from Swensen's Management Hub${sheet.completed_at ? ` · Archived ${inventoryTimestampLabel(sheet.completed_at)}` : ""}</footer></section>`;
+    document.body.classList.add("printing-inventory");
+    window.addEventListener("afterprint", () => {
+      document.body.classList.remove("printing-inventory");
+      printRoot.innerHTML = "";
+    }, { once: true });
+    window.requestAnimationFrame(() => window.print());
+  }
+
+  function downloadProductionSheet(sheetId) {
+    const sheet = state.productionSheets.find((item) => item.id === sheetId);
+    if (!sheet) return;
+    const slots = productionSheetSlots(sheet);
+    const rows = [[
+      "sheet_number", "status", "started_on", "completed_at", "flavor", "category",
+      "archived_can_count", "archived_half_gallon_count",
+      ...slots.flatMap((slot) => [`can_date_${slot.slot_number}`, `cans_made_${slot.slot_number}`]),
+      ...slots.flatMap((slot) => [`half_gallon_date_${slot.slot_number}`, `half_gallons_made_${slot.slot_number}`]),
+    ]];
+    productionSheetFlavors(sheet).forEach((flavor) => {
+      rows.push([
+        sheet.sheet_number, sheet.status, sheet.started_on || "", sheet.completed_at || "", flavor.name,
+        inventoryCategoryLabels[flavor.category] || flavor.category,
+        Number.isInteger(flavor.canCount) ? flavor.canCount : "",
+        Number.isInteger(flavor.halfGallonCount) ? flavor.halfGallonCount : "",
+        ...slots.flatMap((slot) => [slot.can_date || "", Number(productionSheetCell(slot, flavor.id)?.can_quantity) || ""]),
+        ...slots.flatMap((slot) => [slot.half_gallon_date || "", Number(productionSheetCell(slot, flavor.id)?.half_gallon_quantity) || ""]),
+      ]);
+    });
+    const blob = new Blob([rows.map((row) => row.map(csvCell).join(",")).join("\n")], { type: "text/csv;charset=utf-8" });
+    const blobUrl = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = blobUrl;
+    link.download = `swensens-master-sheet-${String(sheet.sheet_number).padStart(3, "0")}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(blobUrl);
+    showToast("Master-sheet data downloaded.");
+  }
+
   function openApp(profile) {
     state.profile = profile;
     state.role = profile.account_role || "employee";
@@ -1735,6 +1825,41 @@ window.staffEmailFromCode = function staffEmailFromCode(code) {
     return productionSheetSlots(sheet).filter((slot) => slot.can_date || slot.half_gallon_date || (slot.cells || []).some((cell) => cell.can_quantity > 0 || cell.half_gallon_quantity > 0)).length;
   }
 
+  function productionSheetFlavors(sheet = viewedProductionSheet()) {
+    if (sheet?.status === "complete" && Array.isArray(sheet.inventory_snapshot) && sheet.inventory_snapshot.length) {
+      return sheet.inventory_snapshot.map((flavor) => ({
+        id: flavor.flavor_id,
+        name: flavor.name,
+        category: flavor.category,
+        sort_order: Number(flavor.sort_order) || 0,
+        tracksHalfGallons: Boolean(flavor.tracks_half_gallons),
+        canCount: Number.isInteger(flavor.can_count) ? flavor.can_count : null,
+        halfGallonCount: Number.isInteger(flavor.half_gallon_count) ? flavor.half_gallon_count : null,
+      })).sort((a, b) => a.sort_order - b.sort_order);
+    }
+    return state.inventoryFlavors;
+  }
+
+  function productionSheetTotals(sheet) {
+    return productionSheetSlots(sheet).reduce((totals, slot) => {
+      (slot.cells || []).forEach((cell) => {
+        totals.cans += Number(cell.can_quantity) || 0;
+        totals.halfGallons += Number(cell.half_gallon_quantity) || 0;
+      });
+      return totals;
+    }, { cans: 0, halfGallons: 0 });
+  }
+
+  function productionSheetDateRange(sheet) {
+    const dates = productionSheetSlots(sheet)
+      .flatMap((slot) => [slot.can_date, slot.half_gallon_date])
+      .filter(Boolean)
+      .sort();
+    if (!dates.length) return "No production dates";
+    if (dates[0] === dates.at(-1)) return inventoryDateLabel(dates[0]);
+    return `${inventoryDateLabel(dates[0])} – ${inventoryDateLabel(dates.at(-1))}`;
+  }
+
   function inventoryPaperRows(flavors, columnCount, rowRenderer) {
     return Object.entries(inventoryCategoryLabels).map(([category, label]) => {
       const rows = flavors.filter((flavor) => flavor.category === category);
@@ -1750,6 +1875,7 @@ window.staffEmailFromCode = function staffEmailFromCode(code) {
     const sheet = viewedProductionSheet();
     const activeSheet = activeProductionSheet();
     const slots = productionSheetSlots(sheet);
+    const sheetFlavors = productionSheetFlavors(sheet);
     const productionCell = (slot, flavor, kind) => {
       const cell = productionSheetCell(slot, flavor.id);
       const value = kind === "can" ? cell?.can_quantity : cell?.half_gallon_quantity;
@@ -1766,7 +1892,7 @@ window.staffEmailFromCode = function staffEmailFromCode(code) {
           <th scope="col" class="half-gallon-divider">½ Gallons</th>
           ${slots.map((slot) => `<th scope="col">${inventoryShortDate(slot.half_gallon_date)}</th>`).join("")}
         </tr></thead>
-        <tbody>${inventoryPaperRows(state.inventoryFlavors, 13, (flavor) => `<tr>
+        <tbody>${inventoryPaperRows(sheetFlavors, 13, (flavor) => `<tr>
           <th scope="row">${escapeHtml(flavor.name)}</th>
           <td class="inventory-current-count">${Number.isInteger(flavor.canCount) ? flavor.canCount : `<span>Count needed</span>`}</td>
           ${slots.map((slot) => productionCell(slot, flavor, "can")).join("")}
@@ -1782,16 +1908,28 @@ window.staffEmailFromCode = function staffEmailFromCode(code) {
         <tbody>${inventoryPaperRows(halfFlavors, 2, (flavor) => `<tr><th scope="row">${escapeHtml(flavor.name)}</th><td class="inventory-current-count">${Number.isInteger(flavor.halfGallonCount) ? flavor.halfGallonCount : `<span>Count needed</span>`}</td></tr>`)}</tbody>
       </table>
     </div>`;
+    const sheetStatusCopy = sheet?.status === "complete" ? "Archived master list" : "Live master list";
     return `<section class="inventory-master-panel panel">
-      <div class="panel-heading inventory-master-heading"><div><p class="eyebrow">Live master list</p><h3>${isHalfGallons ? "½-gallon count sheet" : `Production master sheet${sheet ? ` #${sheet.sheet_number}` : ""}`}</h3><p>${isHalfGallons ? "The separate two-column list for the current ½-gallon counts." : "The same column order as the paper sheet: cans, five can dates, the blank ½-gallon divider, then five ½-gallon dates."}</p></div>
+      <div class="panel-heading inventory-master-heading"><div><p class="eyebrow">${isHalfGallons ? "Live master list" : sheetStatusCopy}</p><h3>${isHalfGallons ? "½-gallon count sheet" : `Production master sheet${sheet ? ` #${sheet.sheet_number}` : ""}`}</h3><p>${isHalfGallons ? "The separate two-column list for the current ½-gallon counts." : sheet?.status === "complete" ? "This completed sheet is locked in the archive with the inventory counts captured when it was finished." : "The same column order as the paper sheet: cans, five can dates, the blank ½-gallon divider, then five ½-gallon dates."}</p></div>
         <div class="inventory-master-tabs" role="tablist" aria-label="Master inventory list">
           <button type="button" data-inventory-master-view="can" class="${kind === "can" ? "active" : ""}">Production sheet</button>
           <button type="button" data-inventory-master-view="half_gallon" class="${isHalfGallons ? "active" : ""}">½-gallon counts</button>
         </div>
       </div>
-      ${!isHalfGallons && sheetChoices ? `<div class="production-sheet-toolbar"><label>Digital sheet<select data-production-sheet-view>${sheetChoices}</select></label><span>${daysUsed} / 5 production days</span>${sheet?.id === activeSheet?.id && daysUsed === 5 ? `<button type="button" class="secondary-button compact" data-start-production-sheet>Start next 5-day sheet</button>` : ""}</div>` : ""}
+      ${!isHalfGallons && sheetChoices ? `<div class="production-sheet-toolbar"><label>Digital sheet<select data-production-sheet-view>${sheetChoices}</select></label><span>${sheet?.status === "complete" ? `Archived · ${productionSheetDateRange(sheet)}` : `${daysUsed} / 5 production days`}</span><div class="production-sheet-actions"><button type="button" class="secondary-button compact" data-print-production-sheet="${sheet.id}">Print / Save PDF</button>${sheet?.status === "complete" ? `<button type="button" class="secondary-button compact" data-download-production-sheet="${sheet.id}">Download data</button>` : ""}${sheet?.id === activeSheet?.id && daysUsed === 5 ? `<button type="button" class="primary-button compact" data-archive-production-sheet>Complete & archive</button>` : ""}</div></div>` : ""}
       ${isHalfGallons ? halfGallonSheet : productionSheet}
-      <p class="inventory-paper-note">${isHalfGallons ? "This count changes whenever ½ gallons are made, used, or physically corrected." : "Production entries automatically fill these date columns. On a phone, swipe the sheet sideways to see every column."}</p>
+      <p class="inventory-paper-note">${isHalfGallons ? "This count changes whenever ½ gallons are made, used, or physically corrected." : sheet?.status === "complete" ? "Archived sheets stay read-only. Print them again or download their structured data at any time." : "Production entries automatically fill these date columns. On a phone, swipe the sheet sideways to see every column."}</p>
+    </section>`;
+  }
+
+  function renderProductionArchiveLibrary() {
+    const completed = state.productionSheets.filter((sheet) => sheet.status === "complete");
+    return `<section class="panel production-archive-panel">
+      <div class="panel-heading"><div><p class="eyebrow">Permanent records</p><h3>Past master sheet library</h3><p>Every completed five-day sheet stays here with its frozen counts and production details.</p></div><span class="count-badge">${completed.length}</span></div>
+      ${completed.length ? `<div class="production-archive-list">${completed.map((sheet) => {
+        const totals = productionSheetTotals(sheet);
+        return `<article class="production-archive-card"><div><span class="inventory-history-type archive">Archived</span><strong>Master sheet #${sheet.sheet_number}</strong><p>${productionSheetDateRange(sheet)}</p><small>${totals.cans} cans made · ${totals.halfGallons} half gallons made${sheet.completed_by_name ? ` · Completed by ${escapeHtml(sheet.completed_by_name)}` : ""}</small></div><div class="production-archive-actions"><button type="button" class="secondary-button compact" data-view-production-sheet="${sheet.id}">View sheet</button><button type="button" class="secondary-button compact" data-print-production-sheet="${sheet.id}">Print / Save PDF</button><button type="button" class="secondary-button compact" data-download-production-sheet="${sheet.id}">Download data</button></div></article>`;
+      }).join("")}</div>` : `<div class="inventory-empty">The first finished five-day sheet will appear here.</div>`}
     </section>`;
   }
 
@@ -2159,6 +2297,7 @@ window.staffEmailFromCode = function staffEmailFromCode(code) {
       </div>
       ${renderInventoryCameraReader()}
       ${renderInventoryMaster()}
+      ${renderProductionArchiveLibrary()}
       ${renderOpeningCountForm(missingUnitCount)}
       ${missingUnitCount ? "" : renderInventoryEntryForm()}
       ${renderFlavorManager()}
@@ -2177,8 +2316,8 @@ window.staffEmailFromCode = function staffEmailFromCode(code) {
       flavorRequest,
       supabaseClient.from("ice_cream_inventory").select("flavor_id, can_count, half_gallon_count, updated_at"),
       supabaseClient.from("ice_cream_production_sheets")
-        .select("id, sheet_number, status, started_on, completed_at, created_at, ice_cream_production_slots(slot_number, can_date, half_gallon_date, ice_cream_production_cells(flavor_id, can_quantity, half_gallon_quantity))")
-        .order("sheet_number", { ascending: false }).limit(12),
+        .select("id, sheet_number, status, started_on, completed_at, completed_by_name, inventory_snapshot, created_at, ice_cream_production_slots(slot_number, can_date, half_gallon_date, ice_cream_production_cells(flavor_id, can_quantity, half_gallon_quantity))")
+        .order("sheet_number", { ascending: false }).limit(100),
     ]);
     if (flavorError || countError || sheetError) {
       state.inventoryLoading = false;
@@ -2635,6 +2774,8 @@ window.staffEmailFromCode = function staffEmailFromCode(code) {
   async function startNextProductionSheet() {
     const sheet = activeProductionSheet();
     if (!sheet || state.inventoryBusy) return;
+    if (!window.confirm(`Complete and archive master sheet #${sheet.sheet_number}? Its counts and five production days will be locked, and a new blank sheet will open.`)) return;
+    const archivedSheetId = sheet.id;
     state.inventoryBusy = true;
     const { error } = await supabaseClient.rpc("start_next_ice_cream_production_sheet", { p_sheet_id: sheet.id });
     state.inventoryBusy = false;
@@ -2644,9 +2785,9 @@ window.staffEmailFromCode = function staffEmailFromCode(code) {
     }
     resetProductionScan();
     await loadInventoryData();
-    state.productionSheetViewId = activeProductionSheet()?.id || "";
+    state.productionSheetViewId = archivedSheetId;
     renderInventory();
-    showToast("A new blank five-day production sheet is ready.");
+    showToast("Master sheet archived. A new blank five-day sheet is ready.");
   }
 
   async function confirmInventoryScan(form) {
@@ -3658,8 +3799,29 @@ window.staffEmailFromCode = function staffEmailFromCode(code) {
       return;
     }
 
-    if (event.target.closest("[data-start-production-sheet]")) {
+    if (event.target.closest("[data-archive-production-sheet]")) {
       startNextProductionSheet();
+      return;
+    }
+
+    const viewProductionSheet = event.target.closest("[data-view-production-sheet]");
+    if (viewProductionSheet) {
+      state.productionSheetViewId = viewProductionSheet.dataset.viewProductionSheet;
+      state.inventoryMasterView = "can";
+      renderInventory();
+      document.querySelector(".inventory-master-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      return;
+    }
+
+    const printProductionSheetButton = event.target.closest("[data-print-production-sheet]");
+    if (printProductionSheetButton) {
+      printProductionSheet(printProductionSheetButton.dataset.printProductionSheet);
+      return;
+    }
+
+    const downloadProductionSheetButton = event.target.closest("[data-download-production-sheet]");
+    if (downloadProductionSheetButton) {
+      downloadProductionSheet(downloadProductionSheetButton.dataset.downloadProductionSheet);
       return;
     }
 

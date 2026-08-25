@@ -1,0 +1,24 @@
+{
+  "name": "Swensen's Management Hub",
+  "short_name": "Swensen's Hub",
+  "description": "Schedules, requests, training, IC production, and inventory tools.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#fbf6ea",
+  "theme_color": "#9f1833",
+  "icons": [
+    {
+      "src": "./app-icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "./app-icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

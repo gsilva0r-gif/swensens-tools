@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <meta name="theme-color" content="#9f1833" />
+    <meta name="theme-color" content="#B5222B" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-title" content="Swensen's Hub" />
     <meta name="description" content="Scheduling, requests, training, IC production, and inventory tools for Swensen's management." />
@@ -12,6 +12,9 @@
     <meta property="og:image" content="https://swensens-management-hub.gsilva0r-sf.chatgpt.site/og.png" />
     <meta name="twitter:card" content="summary_large_image" />
     <title>Swensen's Management Hub</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Alfa+Slab+One&family=Karla:ital,wght@0,400;0,500;0,700;1,400&family=Yellowtail&display=swap" rel="stylesheet" />
     <link rel="icon" href="./favicon.svg" />
     <link rel="apple-touch-icon" sizes="180x180" href="./apple-touch-icon.png" />
     <link rel="manifest" href="./manifest.webmanifest" />
@@ -19,16 +22,15 @@
   </head>
   <body>
     <div class="stripe" aria-hidden="true"></div>
-
     <main id="loginView" class="login-shell">
       <section class="login-card" aria-labelledby="loginTitle">
-        <div class="scoop-mark" aria-hidden="true">
-          <span></span><span></span><span></span>
+        <div class="login-brand">
+          <img class="login-logo" src="./swensens-brand-logo.png" alt="Swensen's Ice Cream and Sundaes since 1948" />
+          <div class="login-brand-copy">
+            <h1 id="loginTitle">Staff Hub</h1>
+            <p class="login-subtitle">Swensen's · San Francisco</p>
+          </div>
         </div>
-        <p class="eyebrow">San Francisco · Since 1948</p>
-        <h1 id="loginTitle">Swensen's</h1>
-        <p class="login-subtitle">Management Hub</p>
-        <p class="login-copy">Schedules, requests, training, IC production, and inventory—all in one place.</p>
 
         <form id="loginForm" class="login-form">
           <label for="loginId">Employee ID or manager email</label>
@@ -49,15 +51,18 @@
           <p id="loginMessage" class="form-message" role="status"></p>
         </form>
 
-        <p class="secure-note">Your PIN is protected by Supabase and is never stored in this website's code.</p>
+        <p class="secure-note">Secure sign-in powered by Supabase.</p>
       </section>
     </main>
 
     <div id="appView" class="app-shell" hidden>
       <header class="app-header">
         <button class="brand-button" data-nav="home" aria-label="Open dashboard">
-          <span class="brand-script">Swensen's</span>
-          <span class="brand-small">Management Hub</span>
+          <img class="header-brand-logo" src="./swensens-brand-logo.png" alt="" />
+          <span class="header-brand-copy">
+            <span class="brand-script">Swensen's Hub</span>
+            <span class="brand-small">Hyde &amp; Union</span>
+          </span>
         </button>
         <div class="header-actions">
           <span id="roleBadge" class="role-badge">Manager</span>
@@ -68,7 +73,7 @@
       <div class="desktop-layout">
         <aside class="side-nav" aria-label="Primary navigation">
           <button class="nav-item active manager-only-nav" data-nav="home"><span>⌂</span>Home</button>
-          <button class="nav-item" data-nav="schedule"><span>▦</span>Build schedule</button>
+          <button class="nav-item" data-nav="schedule"><span>▦</span>Schedule</button>
           <button class="nav-item" data-nav="inventory"><span>◫</span>Inventory</button>
         </aside>
 
@@ -77,29 +82,29 @@
             <div class="welcome-row">
               <div>
                 <p id="todayLabel" class="eyebrow"></p>
-                <h2>Good morning, <span id="displayName">Manager</span>.</h2>
-                <p>Here’s what needs attention for the next schedule.</p>
+                <h2>Hi, <span id="displayName">Manager</span>.</h2>
+                <p>What would you like to work on?</p>
               </div>
               <button class="primary-button compact" data-nav="schedule">Build schedule</button>
             </div>
 
             <div class="status-grid">
               <article class="status-card mint">
-                <span class="card-kicker">Coverage</span>
+                <span class="card-kicker">Requests</span>
                 <strong id="requestMetric">12 of 14</strong>
-                <p>Shift requests submitted</p>
+                <p>Submitted</p>
                 <span class="status-pill good">On track</span>
               </article>
               <article class="status-card berry">
                 <span class="card-kicker">IC production</span>
                 <strong id="icMetric">3 days</strong>
-                <p>Target for this week</p>
+                <p>This week</p>
                 <span class="status-pill">Flexible</span>
               </article>
               <article class="status-card vanilla">
                 <span class="card-kicker">Training</span>
                 <strong id="trainingMetric">Andrew</strong>
-                <p>IC training requested</p>
+                <p>Trainee</p>
                 <span class="status-pill warn">Needs pairing</span>
               </article>
             </div>
@@ -107,60 +112,66 @@
             <section class="panel attention-panel">
               <div class="panel-heading">
                 <div>
-                  <p class="eyebrow">Manager checklist</p>
-                  <h3>Before you generate</h3>
+                  <p class="eyebrow">Next</p>
+                  <h3>Needs attention</h3>
                 </div>
                 <span class="count-badge">2 open</span>
               </div>
               <button class="attention-row" data-nav="schedule" data-schedule-view="requests">
                 <span class="attention-icon">!</span>
-                <span><strong>2 requests need review</strong><small>One double-shift offer and one day-off note</small></span>
+                <span><strong>Review 2 requests</strong><small>Open employee requests</small></span>
                 <span aria-hidden="true">›</span>
               </button>
               <button class="attention-row" data-nav="schedule">
                 <span class="attention-icon cream">IC</span>
-                <span><strong>Choose this week’s IC target</strong><small>Set 2, 3, or 4 production days</small></span>
+                <span><strong>Set IC production days</strong><small>Choose 2, 3, or 4 days</small></span>
                 <span aria-hidden="true">›</span>
               </button>
             </section>
 
-            <section class="panel">
+            <section id="databaseHealthPanel" class="panel system-check-panel" hidden>
               <div class="panel-heading">
                 <div>
-                  <p class="eyebrow">Current week</p>
-                  <h3>Staffing snapshot</h3>
+                  <p class="eyebrow">Gabriel only</p>
+                  <h3>Database check</h3>
                 </div>
-                <button class="text-button" data-nav="schedule">View all</button>
+                <span class="system-check-icon" aria-hidden="true">DB</span>
               </div>
-              <div class="snapshot-list">
-                <div><span>Open days</span><strong>Tuesday–Sunday</strong></div>
-                <div><span>Monday</span><strong>Closed</strong></div>
-                <div><span>Staffing</span><strong>Set day by day</strong></div>
-                <div><span>IC spacing</span><strong>At least one full day</strong></div>
-                <div><span>Key-holder rule</span><strong class="good-text">Required every shift</strong></div>
+              <div class="system-check-content">
+                <div>
+                  <p>Checks five database areas without changing any records.</p>
+                  <p id="databaseHealthMessage" class="system-check-message" role="status">No system check has been run on this device.</p>
+                </div>
+                <button id="runDatabaseHealthCheck" class="primary-button compact" type="button">Run system check</button>
               </div>
             </section>
 
-            <section id="homeTeamModule" class="home-team-module">
-              <div class="page-title-row"><div><p class="eyebrow">Qualifications & access</p><h2>Swensen's team</h2><p>Add employees, update qualifications, or hide a card without losing its history.</p></div><button id="showEmployeeAccountForm" class="primary-button compact" type="button">Add employee</button></div>
-              <div id="employeeAccountManager"></div>
-              <div class="team-tabs" role="tablist" aria-label="Employee lists">
-                <button class="team-tab active" type="button" role="tab" data-team-view="active">Active team <span id="activeTeamCount" class="tab-count">0</span></button>
-                <button class="team-tab" type="button" role="tab" data-team-view="hidden">Hidden employees <span id="hiddenTeamCount" class="tab-count">0</span></button>
-              </div>
-              <section id="activeTeamPanel"><div id="teamGrid" class="team-grid"></div></section>
-              <section id="hiddenTeamPanel" hidden><div class="hidden-team-heading"><div><p class="eyebrow">Paused access</p><h3>Hidden employees</h3><p>Every hidden employee card stays here until you restore it.</p></div></div><div id="hiddenTeamGrid" class="team-grid"></div></section>
-            </section>
+            <details id="homeTeamDrawer" class="home-team-drawer">
+              <summary>
+                <span><small>Employees</small><strong>Manage team</strong></span>
+                <span class="drawer-action">Open</span>
+              </summary>
+              <section id="homeTeamModule" class="home-team-module">
+                <div class="team-module-heading"><div><h2>Team</h2><p>Add, update, hide, or restore employees.</p></div><button id="showEmployeeAccountForm" class="primary-button compact" type="button">Add employee</button></div>
+                <div id="employeeAccountManager"></div>
+                <div class="team-tabs" role="tablist" aria-label="Employee lists">
+                  <button class="team-tab active" type="button" role="tab" data-team-view="active">Active <span id="activeTeamCount" class="tab-count">0</span></button>
+                  <button class="team-tab" type="button" role="tab" data-team-view="hidden">Hidden <span id="hiddenTeamCount" class="tab-count">0</span></button>
+                </div>
+                <section id="activeTeamPanel"><div id="teamGrid" class="team-grid"></div></section>
+                <section id="hiddenTeamPanel" hidden><div class="hidden-team-heading"><div><h3>Hidden employees</h3><p>Restore an employee whenever they return.</p></div></div><div id="hiddenTeamGrid" class="team-grid"></div></section>
+              </section>
+            </details>
           </section>
 
           <section id="page-schedule" class="page">
             <div id="scheduleManagerHeading" class="page-title-row">
-              <div><p class="eyebrow">Scheduler</p><h2>Build a schedule</h2><p>Review everyone’s availability and requests, then create next week’s schedule.</p></div>
+              <div><p class="eyebrow">Weekly tools</p><h2>Schedule</h2><p>Availability, requests, and schedule options.</p></div>
               <button id="generateButtonTop" class="primary-button compact">Generate options</button>
             </div>
             <div class="schedule-module-tabs" role="tablist" aria-label="Schedule tools">
-              <button class="schedule-module-tab active" type="button" role="tab" data-schedule-view="availability">Availability &amp; requests</button>
-              <button class="schedule-module-tab" type="button" role="tab" data-schedule-view="builder">Build schedule</button>
+              <button class="schedule-module-tab active" type="button" role="tab" data-schedule-view="availability">Availability</button>
+              <button class="schedule-module-tab" type="button" role="tab" data-schedule-view="builder">Build</button>
             </div>
             <section id="scheduleBuilderModule" class="schedule-module-panel" hidden>
               <div id="scheduleSettings" class="settings-grid"></div>
@@ -168,14 +179,14 @@
               <div id="scheduleResults" class="schedule-results"></div>
             </section>
             <section id="scheduleAvailabilityModule" class="schedule-module-panel">
-              <div class="schedule-module-heading"><div><p class="eyebrow">Live availability</p><h3>Team availability sheet</h3><p>This matches the paper layout: days run down the left and employee names run across the top. Employee requests update this sheet.</p></div><button id="saveAvailabilitySheet" class="primary-button compact" type="button">Save manager changes</button></div>
+              <div class="schedule-module-heading"><div><h3>Team availability</h3><p>Always current with employee changes.</p></div><button id="saveAvailabilitySheet" class="primary-button compact" type="button">Save changes</button></div>
               <div id="availabilityMatrix"></div>
               <details id="scheduleRequestsModule" class="schedule-requests-drawer">
                 <summary>
-                  <span><small>Employee requests</small><strong>Requests for this schedule</strong></span>
+                  <span><small>Employee requests</small><strong>Requests</strong></span>
                   <span class="schedule-request-summary-count"><span id="scheduleRequestCount" class="tab-count">0</span><span class="request-drawer-chevron" aria-hidden="true">⌄</span></span>
                 </summary>
-                <div class="schedule-requests-drawer-body"><p>Open an employee to review or update their request for the selected week.</p><div id="scheduleRequestContent"></div></div>
+                <div class="schedule-requests-drawer-body"><div id="scheduleRequestContent"></div></div>
               </details>
             </section>
             <section id="employeeScheduleWorkspace" hidden>
@@ -185,7 +196,7 @@
           </section>
 
           <section id="page-inventory" class="page">
-            <div class="page-title-row"><div><p class="eyebrow">IC workspace</p><h2>Master can inventory</h2><p>Track physical counts, production, used cans, and camera-read paper strips in one shared workspace.</p></div></div>
+            <div class="page-title-row"><div><p class="eyebrow">IC tools</p><h2>Inventory</h2><p>Master cans, ½ gallons, production, and records.</p></div></div>
             <div id="inventoryContent" aria-live="polite"></div>
           </section>
         </main>

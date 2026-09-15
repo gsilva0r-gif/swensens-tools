@@ -34,6 +34,9 @@
     employeeScheduleWorkspace: document.querySelector("#employeeScheduleWorkspace"),
     employeeAccountManager: document.querySelector("#employeeAccountManager"),
     showEmployeeAccountForm: document.querySelector("#showEmployeeAccountForm"),
+    databaseHealthPanel: document.querySelector("#databaseHealthPanel"),
+    databaseHealthMessage: document.querySelector("#databaseHealthMessage"),
+    runDatabaseHealthCheck: document.querySelector("#runDatabaseHealthCheck"),
     inventory: document.querySelector("#inventoryContent"),
   };
 
@@ -55,6 +58,7 @@
     showingEmployeeAccountForm: false,
     teamView: "active",
     scheduleModuleView: "availability",
+    availabilityMobileEmployeeId: "",
     requestsExpanded: false,
     accountActionBusy: false,
     availabilitySheetBusy: false,
@@ -91,6 +95,7 @@
     productionScanError: "",
     productionScanNotes: "",
     productionScanUserNote: "",
+    systemCheckBusy: false,
   };
 
   const seniorityCodes = [
@@ -181,6 +186,54 @@
     showToast.timer = window.setTimeout(() => elements.toast.classList.remove("show"), 2800);
   }
 
+  function isGabrielAccount(profile = state.profile) {
+    const email = String(profile?.email || "").trim().toLowerCase();
+    return email === "gsilva0r.sf@gmail.com" || profile?.employee_code === "GABRIEL01";
+  }
+
+  function systemCheckTimestampLabel(value) {
+    if (!value) return "No system check has been run on this device.";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "No system check has been run on this device.";
+    return `Last successful check: ${new Intl.DateTimeFormat("en-US", {
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    }).format(date)}`;
+  }
+
+  async function runDatabaseHealthCheck() {
+    if (state.mode !== "supabase" || !supabaseClient || !isGabrielAccount() || state.systemCheckBusy) return;
+    state.systemCheckBusy = true;
+    elements.runDatabaseHealthCheck.disabled = true;
+    elements.runDatabaseHealthCheck.textContent = "Checking…";
+    elements.databaseHealthMessage.textContent = "Contacting each part of the database…";
+
+    const checks = await Promise.all([
+      supabaseClient.from("employees").select("id").limit(1),
+      supabaseClient.from("weekly_requests").select("id").limit(1),
+      supabaseClient.from("week_settings").select("week_start").limit(1),
+      supabaseClient.from("ice_cream_inventory").select("flavor_id").limit(1),
+      supabaseClient.from("ice_cream_production_sheets").select("id").limit(1),
+    ]);
+    const failed = checks.find((result) => result.error);
+
+    if (failed) {
+      elements.databaseHealthMessage.textContent = `System check failed: ${failed.error.message}. If the project is paused, resume it in Supabase first.`;
+      showToast("Database system check failed.");
+    } else {
+      const checkedAt = new Date().toISOString();
+      try { window.localStorage.setItem("swensens-last-system-check", checkedAt); } catch (_) {}
+      elements.databaseHealthMessage.textContent = `${systemCheckTimestampLabel(checkedAt)} · 5 database areas responded.`;
+      showToast("Database is active and responding.");
+    }
+
+    state.systemCheckBusy = false;
+    elements.runDatabaseHealthCheck.disabled = false;
+    elements.runDatabaseHealthCheck.textContent = "Run system check";
+  }
+
   function scheduleWeekRows(weekStart) {
     const tuesday = new Date(`${weekStart}T12:00:00`);
     const monday = new Date(tuesday);
@@ -223,6 +276,42 @@
     return parts;
   }
 
+  function mobileScheduleEntry(part) {
+    const approval = part.text.includes("*") ? "*" : "";
+    if (part.type === "morning") return { time: `11:30${approval}`, note: "" };
+    if (part.type === "night") return { time: `5:30${approval}`, note: "" };
+    if (part.type === "ic") return { time: "IC", note: "" };
+
+    const time = part.text.startsWith("11:30") ? "11:30" : part.text.startsWith("5:30") ? "5:30" : "IC";
+    return { time, note: part.type === "trainee" ? "train" : "coach" };
+  }
+
+  function buildMobileScheduleSheet(option, dateFormatter) {
+    const workingDays = scheduleWeekRows(state.settings.weekStart).filter((day) => !day.closed);
+    const dayHeaders = workingDays.map((day) => `<th scope="col"><strong>${escapeHtml(day.name.slice(0, 3))}</strong><small>${dateFormatter.format(day.date)}</small></th>`).join("");
+    const employeeRows = state.team.map((employee) => {
+      const cells = workingDays.map((day) => {
+        const parts = scheduleCellParts(option, day.name, employee.id);
+        if (!parts.length) return `<td><span class="mobile-schedule-off" aria-label="Off">—</span></td>`;
+        const entries = parts.map((part) => {
+          const compact = mobileScheduleEntry(part);
+          return `<span class="mobile-schedule-entry ${part.type}" title="${escapeHtml(part.text)}"><strong>${escapeHtml(compact.time)}</strong>${compact.note ? `<small>${escapeHtml(compact.note)}</small>` : ""}</span>`;
+        }).join("");
+        return `<td>${entries}</td>`;
+      }).join("");
+      return `<tr><th scope="row" title="${escapeHtml(employee.name)}">${escapeHtml(employee.name)}</th>${cells}</tr>`;
+    }).join("");
+
+    return `<div class="mobile-schedule-sheet-wrap">
+      <div class="mobile-schedule-title"><strong>Full week</strong><span>${scheduleWeekLabel(state.settings.weekStart)}</span></div>
+      <table class="mobile-schedule-sheet">
+        <thead><tr><th scope="col">Team</th>${dayHeaders}</tr></thead>
+        <tbody><tr class="mobile-schedule-closed"><th scope="row">Monday</th><td colspan="${workingDays.length}">CLOSED</td></tr>${employeeRows}</tbody>
+      </table>
+      <div class="mobile-schedule-legend"><span><b>11:30</b> morning</span><span><b>5:30</b> night</span><span><b>IC</b> production</span><span><b>train</b> trainee</span><span><b>coach</b> trainer</span><span><b>*</b> approval</span></div>
+    </div>`;
+  }
+
   function buildScheduleSheet(option) {
     const dateFormatter = new Intl.DateTimeFormat("en-US", { month: "numeric", day: "numeric" });
     const roster = state.team;
@@ -235,14 +324,15 @@
       }).join("");
       return `<tr><th>${dayHeading}</th>${cells}</tr>`;
     }).join("");
-    return `<div class="schedule-sheet-wrap">
-      <table class="schedule-sheet">
-        <caption>Swensen's Weekly Schedule · ${scheduleWeekLabel(state.settings.weekStart)}</caption>
-        <thead><tr><th class="day-column">Day</th>${roster.map((employee) => `<th title="${escapeHtml(employee.name)}">${escapeHtml(employee.name)}</th>`).join("")}</tr></thead>
-        <tbody>${rows}</tbody>
-      </table>
-    </div>
-    <div class="schedule-legend"><span><b>11:30</b> Morning</span><span><b>5:30</b> Night</span><span><b>IC</b> Flexible full day</span><span><b>Training</b> Additional</span><span><b>*</b> Approval needed</span><span><b>×</b> Off</span></div>`;
+    return `<div class="desktop-schedule-sheet"><div class="schedule-sheet-wrap">
+        <table class="schedule-sheet">
+          <caption>Swensen's Weekly Schedule · ${scheduleWeekLabel(state.settings.weekStart)}</caption>
+          <thead><tr><th class="day-column">Day</th>${roster.map((employee) => `<th title="${escapeHtml(employee.name)}">${escapeHtml(employee.name)}</th>`).join("")}</tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+      <div class="schedule-legend"><span><b>11:30</b> Morning</span><span><b>5:30</b> Night</span><span><b>IC</b> Flexible full day</span><span><b>Training</b> Additional</span><span><b>*</b> Approval needed</span><span><b>×</b> Off</span></div>
+    </div>${buildMobileScheduleSheet(option, dateFormatter)}`;
   }
 
   function csvCell(value) {
@@ -368,6 +458,12 @@
     document.querySelector("#displayName").textContent = profile.display_name || "Manager";
     document.querySelector("#roleBadge").textContent = state.role === "manager" ? "Manager" : state.canAccessInventory ? "IC Maker" : "Employee";
     elements.logoutButton.textContent = (profile.display_name || "Manager").slice(0, 2).toUpperCase();
+    elements.databaseHealthPanel.hidden = state.mode !== "supabase" || !isGabrielAccount(profile);
+    if (!elements.databaseHealthPanel.hidden) {
+      let lastCheck = "";
+      try { lastCheck = window.localStorage.getItem("swensens-last-system-check") || ""; } catch (_) {}
+      elements.databaseHealthMessage.textContent = systemCheckTimestampLabel(lastCheck);
+    }
     renderAll();
     navigate(state.role === "manager" ? "home" : "schedule");
   }
@@ -388,6 +484,7 @@
     state.showingEmployeeAccountForm = false;
     state.teamView = "active";
     state.scheduleModuleView = "availability";
+    state.availabilityMobileEmployeeId = "";
     state.requestsExpanded = false;
     state.accountActionBusy = false;
     state.availabilitySheetBusy = false;
@@ -421,6 +518,8 @@
     state.productionScanError = "";
     state.productionScanNotes = "";
     state.productionScanUserNote = "";
+    state.systemCheckBusy = false;
+    elements.databaseHealthPanel.hidden = true;
     elements.appView.classList.remove("employee-mode");
     elements.appView.classList.remove("inventory-staff-mode");
     elements.appView.hidden = true;
@@ -450,6 +549,8 @@
 
   function openTeamOnHome() {
     navigate("home");
+    const drawer = document.querySelector("#homeTeamDrawer");
+    if (drawer) drawer.open = true;
     window.setTimeout(() => document.querySelector("#homeTeamModule")?.scrollIntoView({ behavior: "smooth", block: "start" }), 80);
   }
 
@@ -1893,20 +1994,71 @@
     return `<button class="availability-slot-toggle ${preference}" type="button" data-availability-employee="${employee.id}" data-availability-day="${day.name}" data-availability-shift="${shift}" aria-label="${escapeHtml(employee.name)} ${day.name} ${shift === "AM" ? "morning" : "night"}: ${label}"><small>${shift}</small><strong>${mark}</strong></button>`;
   }
 
+  function availabilityShiftCellMarkup(employee, day, tagName = "td") {
+    const am = employee.availability?.[day.name]?.AM || "available";
+    const pm = employee.availability?.[day.name]?.PM || "available";
+    const allDayOff = am === "unavailable" && pm === "unavailable";
+    const splitDay = !allDayOff && am !== pm;
+    return `<${tagName} class="availability-shift-cell boxed-day ${allDayOff ? "all-day-off" : ""} ${splitDay ? "split-day" : ""}">${availabilitySlotMarkup(employee, day, "AM")}${availabilitySlotMarkup(employee, day, "PM")}${allDayOff ? `<span class="all-day-x" aria-hidden="true">×</span>` : ""}</${tagName}>`;
+  }
+
+  function mobileAvailabilityOverviewCellMarkup(employee, day) {
+    const am = employee.availability?.[day.name]?.AM || "available";
+    const pm = employee.availability?.[day.name]?.PM || "available";
+    const allDayOff = am === "unavailable" && pm === "unavailable";
+    const allDayPreferred = am === "preferred" && pm === "preferred";
+    const splitDay = !allDayOff && !allDayPreferred && am !== pm;
+    const preferenceLabel = (value) => value === "unavailable" ? "unavailable" : value === "preferred" ? "preferred" : "available";
+    const compactMark = (preference, shift) => {
+      if (preference === "available") return `<span class="mobile-availability-overview-slot ${shift.toLowerCase()} available" aria-hidden="true"></span>`;
+      return `<span class="mobile-availability-overview-slot ${shift.toLowerCase()} ${preference}" aria-hidden="true">${preference === "unavailable" ? "×" : "★"}</span>`;
+    };
+    const label = `${employee.name} ${day.name}: morning ${preferenceLabel(am)}, night ${preferenceLabel(pm)}`;
+    return `<td class="mobile-availability-overview-cell ${allDayOff ? "all-day-off" : ""} ${allDayPreferred ? "all-day-preferred" : ""} ${splitDay ? "split-day" : ""}" aria-label="${escapeHtml(label)}">${allDayOff ? `<span class="mobile-availability-overview-x" aria-hidden="true">×</span>` : allDayPreferred ? `<span class="mobile-availability-overview-star" aria-hidden="true">★</span>` : `${compactMark(am, "AM")}${compactMark(pm, "PM")}`}</td>`;
+  }
+
   function renderAvailabilityMatrix() {
     if (state.role !== "manager") return;
     const targetRow = `<tr class="availability-target-row"><th scope="row"><strong>Monday</strong><small>Store closed · requested days</small></th>${state.team.map((employee) => `<td class="availability-target-cell"><div><input type="number" min="0" max="6" value="${employee.minDays}" data-availability-min="${employee.id}" aria-label="${escapeHtml(employee.name)} minimum days"><span>-</span><input type="number" min="0" max="6" value="${employee.maxDays}" data-availability-max="${employee.id}" aria-label="${escapeHtml(employee.name)} maximum days"></div></td>`).join("")}</tr>`;
-    const dayRows = demoData.days.map((day) => `<tr class="availability-day-row"><th scope="row"><strong>${day.name}</strong><small>${day.short}</small></th>${state.team.map((employee) => {
-      const am = employee.availability?.[day.name]?.AM || "available";
-      const pm = employee.availability?.[day.name]?.PM || "available";
-      const allDayOff = am === "unavailable" && pm === "unavailable";
-      const splitDay = !allDayOff && am !== pm;
-      return `<td class="availability-shift-cell boxed-day ${allDayOff ? "all-day-off" : ""} ${splitDay ? "split-day" : ""}">${availabilitySlotMarkup(employee, day, "AM")}${availabilitySlotMarkup(employee, day, "PM")}${allDayOff ? `<span class="all-day-x" aria-hidden="true">×</span>` : ""}</td>`;
-    }).join("")}</tr>`).join("");
+    const dayRows = demoData.days.map((day) => `<tr class="availability-day-row"><th scope="row"><strong>${day.name}</strong><small>${day.short}</small></th>${state.team.map((employee) => availabilityShiftCellMarkup(employee, day)).join("")}</tr>`).join("");
     const noteRow = `<tr class="availability-notes-row"><th scope="row"><strong>Notes</strong><small>Rules & preferences</small></th>${state.team.map((employee) => `<td class="availability-note-cell"><textarea rows="2" data-availability-note="${employee.id}" aria-label="${escapeHtml(employee.name)} scheduling note" placeholder="—">${escapeHtml(employee.notes || "")}</textarea></td>`).join("")}</tr>`;
     const headers = state.team.map((employee) => `<th><strong>${escapeHtml(employee.name)}</strong><small>${escapeHtml(employee.code || "")}</small></th>`).join("");
+    const selectedMobileEmployee = state.team.find((employee) => String(employee.id) === String(state.availabilityMobileEmployeeId)) || state.team[0];
+    if (selectedMobileEmployee) state.availabilityMobileEmployeeId = selectedMobileEmployee.id;
+    const selectedMobileIndex = selectedMobileEmployee ? state.team.findIndex((employee) => String(employee.id) === String(selectedMobileEmployee.id)) : -1;
+    const mobileEmployeeOptions = state.team.map((employee) => `<option value="${escapeHtml(String(employee.id))}" ${String(employee.id) === String(selectedMobileEmployee?.id) ? "selected" : ""}>${escapeHtml(employee.name)}</option>`).join("");
+    const mobileWorkingDays = scheduleWeekRows(state.settings.weekStart).filter((day) => !day.closed);
+    const mobileDateFormatter = new Intl.DateTimeFormat("en-US", { month: "numeric", day: "numeric" });
+    const mobileDayHeaders = mobileWorkingDays.map((day) => `<th scope="col"><strong>${escapeHtml(day.name.slice(0, 3))}</strong><small>${mobileDateFormatter.format(day.date)}</small></th>`).join("");
+    const mobileOverviewRows = state.team.map((employee) => `<tr><th scope="row"><strong>${escapeHtml(employee.name)}</strong><small>${employee.minDays}-${employee.maxDays}</small></th>${demoData.days.map((day) => mobileAvailabilityOverviewCellMarkup(employee, day)).join("")}</tr>`).join("");
+    const mobileEditor = selectedMobileEmployee ? `<details class="mobile-availability-editor">
+        <summary><span><strong>Edit availability</strong><small>One employee at a time</small></span><span aria-hidden="true">⌄</span></summary>
+        <div class="mobile-availability-editor-body">
+          <div class="mobile-availability-picker">
+            <button type="button" data-mobile-availability-step="-1" aria-label="Previous employee">‹</button>
+            <label><span>Employee ${selectedMobileIndex + 1} of ${state.team.length}</span><select data-mobile-availability-employee aria-label="Choose employee">${mobileEmployeeOptions}</select></label>
+            <button type="button" data-mobile-availability-step="1" aria-label="Next employee">›</button>
+          </div>
+          <div class="mobile-availability-target">
+            <span><strong>Requested days</strong><small>Minimum–maximum</small></span>
+            <div><input type="number" min="0" max="6" value="${selectedMobileEmployee.minDays}" data-availability-min="${selectedMobileEmployee.id}" aria-label="${escapeHtml(selectedMobileEmployee.name)} minimum days"><span>–</span><input type="number" min="0" max="6" value="${selectedMobileEmployee.maxDays}" data-availability-max="${selectedMobileEmployee.id}" aria-label="${escapeHtml(selectedMobileEmployee.name)} maximum days"></div>
+          </div>
+          <div class="mobile-availability-days">${demoData.days.map((day) => `<article class="mobile-availability-day"><header><strong>${day.name}</strong><small>${day.short}</small></header>${availabilityShiftCellMarkup(selectedMobileEmployee, day, "div")}</article>`).join("")}</div>
+          <label class="mobile-availability-note"><span>Notes</span><textarea rows="3" data-availability-note="${selectedMobileEmployee.id}" aria-label="${escapeHtml(selectedMobileEmployee.name)} scheduling note" placeholder="No notes">${escapeHtml(selectedMobileEmployee.notes || "")}</textarea></label>
+        </div>
+      </details>` : "";
+    const mobileAvailability = state.team.length ? `<section class="availability-mobile-view" aria-label="Mobile team availability sheet">
+        <div class="mobile-availability-overview-title"><strong>Team availability</strong><span>${scheduleWeekLabel(state.settings.weekStart)}</span></div>
+        <table class="mobile-availability-overview">
+          <thead><tr><th scope="col">Team<small>days</small></th>${mobileDayHeaders}</tr></thead>
+          <tbody><tr class="mobile-availability-closed"><th scope="row">Monday</th><td colspan="${mobileWorkingDays.length}">CLOSED</td></tr>${mobileOverviewRows}</tbody>
+        </table>
+        <p class="mobile-availability-overview-help">Red X = unavailable. A top or bottom X means only that shift is unavailable.</p>
+        ${mobileEditor}
+      </section>` : `<section class="availability-mobile-view"><p class="inventory-empty">No active employees.</p></section>`;
     elements.availabilityMatrix.innerHTML = `<div class="availability-matrix-summary"><span><strong>${state.team.length}</strong> active employees</span><span><strong>${scheduleWeekLabel(state.settings.weekStart)}</strong> schedule week</span></div>
-      <div class="availability-matrix-wrap"><table class="availability-matrix"><caption>Team availability for ${scheduleWeekLabel(state.settings.weekStart)}</caption><thead><tr><th>Day</th>${headers}</tr></thead><tbody>${targetRow}${dayRows}${noteRow}</tbody></table></div>
+      <div class="availability-desktop-view"><div class="availability-matrix-wrap"><table class="availability-matrix"><caption>Team availability for ${scheduleWeekLabel(state.settings.weekStart)}</caption><thead><tr><th>Day</th>${headers}</tr></thead><tbody>${targetRow}${dayRows}${noteRow}</tbody></table></div></div>
+      ${mobileAvailability}
       <div class="availability-matrix-legend"><span><b class="legend-available">blank</b> Available</span><span><b class="legend-preferred">★</b> Preferred</span><span><b class="legend-unavailable">×</b> Cannot work</span><small>A divider appears only when morning and night differ: morning is above the line and night is below it. A large X means the employee cannot work that entire day.</small></div>`;
   }
 
@@ -1969,7 +2121,7 @@
       state.availabilitySheetBusy = false;
       const nextButton = document.querySelector("#saveAvailabilitySheet");
       nextButton.disabled = false;
-      nextButton.textContent = "Save availability sheet";
+      nextButton.textContent = "Save changes";
     }
   }
 
@@ -2445,12 +2597,19 @@
   async function generateSchedules() {
     if (state.role !== "manager") return;
     if (state.mode === "supabase") {
+      const selectedTrainee = state.settings.trainingEnabled
+        ? state.team.find((employee) => String(employee.id) === String(state.settings.traineeId))
+        : null;
+      if (state.settings.trainingEnabled && !selectedTrainee) {
+        showToast("Choose an active trainee before generating schedules.");
+        return;
+      }
       const { error } = await supabaseClient.from("week_settings").upsert({
         week_start: state.settings.weekStart,
         ic_days_target: state.settings.icTarget,
         allow_consecutive_ic: state.settings.allowConsecutiveIC,
         training_enabled: state.settings.trainingEnabled,
-        trainee_id: state.settings.trainingEnabled ? state.settings.traineeId : null,
+        trainee_id: state.settings.trainingEnabled ? selectedTrainee.id : null,
         training_skill: state.settings.trainingSkill,
         training_day: null,
         training_shift: null,
@@ -2505,7 +2664,7 @@
         ? `<button class="primary-button compact publish-button" data-publish-option="${index}">Publish to employees</button>`
         : "";
       return `<article class="schedule-option ${index === 0 ? "best" : ""} ${selected ? "selected" : ""} ${published ? "published" : ""}">
-        <div class="option-header"><div><span class="option-label">${index === 0 ? "Best match" : `Option ${index + 1}`}</span><h3>${option.summary.criticalCount ? `${option.summary.criticalCount} coverage issue(s)` : "All hard rules met"}</h3><p>Names are across the top, matching the schedule sheet your store already uses.</p></div><span class="score-chip">${published ? "Published" : selected ? "Selected" : `Score ${option.score}`}</span></div>
+        <div class="option-header"><div><span class="option-label">${index === 0 ? "Best match" : `Option ${index + 1}`}</span><h3>${option.summary.criticalCount ? `${option.summary.criticalCount} coverage issue(s)` : "All hard rules met"}</h3><p>Review the complete week and every team member in one schedule.</p></div><span class="score-chip">${published ? "Published" : selected ? "Selected" : `Score ${option.score}`}</span></div>
         ${buildScheduleSheet(option)}
         <div class="option-footer"><span>${option.summary.icDaysScheduled} IC days · ${option.summary.approvalCount} approvals</span><div class="schedule-actions"><button class="secondary-button compact" data-print-option="${index}">Print / Save PDF</button><button class="secondary-button compact" data-download-option="${index}">Download CSV</button><button class="secondary-button compact" data-use-option="${index}" ${selected || saved || published ? "disabled" : ""}>${chooseLabel}</button>${publishButton}</div></div>
       </article>`;
@@ -2720,6 +2879,10 @@
 
     const { data: savedSettings } = await supabaseClient.from("week_settings").select("*").eq("week_start", state.settings.weekStart).maybeSingle();
     const loadedSettings = clone(demoData.defaultSettings);
+    const demoDefaultTrainee = demoData.team.find((employee) => String(employee.id) === String(loadedSettings.traineeId));
+    const liveDefaultTrainee = state.team.find((employee) => employee.code === demoDefaultTrainee?.code);
+    loadedSettings.traineeId = liveDefaultTrainee?.id || null;
+    loadedSettings.trainingEnabled = Boolean(loadedSettings.trainingEnabled && loadedSettings.traineeId);
     if (savedSettings) {
       Object.assign(loadedSettings, {
         weekStart: savedSettings.week_start,
@@ -2729,6 +2892,10 @@
         traineeId: savedSettings.trainee_id,
         trainingSkill: savedSettings.training_skill,
       });
+    }
+    if (loadedSettings.trainingEnabled && !state.team.some((employee) => String(employee.id) === String(loadedSettings.traineeId))) {
+      loadedSettings.traineeId = liveDefaultTrainee?.id || null;
+      loadedSettings.trainingEnabled = Boolean(loadedSettings.traineeId);
     }
     const { data: savedStaffing } = await supabaseClient.from("daily_staffing")
       .select("*").eq("week_start", loadedSettings.weekStart);
@@ -2763,7 +2930,7 @@
     }
 
     state.mode = "supabase";
-    openApp({ ...profile, display_name: profile.display_name, account_role: profile.account_role, skills: state.profileSkills });
+    openApp({ ...profile, email: session.user.email || "", display_name: profile.display_name, account_role: profile.account_role, skills: state.profileSkills });
     startRequestSync();
   }
 
@@ -2839,6 +3006,7 @@
   });
   elements.loginForm.addEventListener("submit", handleLogin);
   elements.logoutButton.addEventListener("click", closeApp);
+  elements.runDatabaseHealthCheck.addEventListener("click", runDatabaseHealthCheck);
   elements.showEmployeeAccountForm.addEventListener("click", () => {
     state.showingEmployeeAccountForm = !state.showingEmployeeAccountForm;
     renderEmployeeAccountManager();
@@ -2847,6 +3015,15 @@
   document.querySelector("#generateButtonTop").addEventListener("click", generateSchedules);
 
   document.addEventListener("click", (event) => {
+    const mobileAvailabilityStep = event.target.closest("[data-mobile-availability-step]");
+    if (mobileAvailabilityStep && state.team.length) {
+      const currentIndex = Math.max(0, state.team.findIndex((employee) => String(employee.id) === String(state.availabilityMobileEmployeeId)));
+      const nextIndex = (currentIndex + Number(mobileAvailabilityStep.dataset.mobileAvailabilityStep) + state.team.length) % state.team.length;
+      state.availabilityMobileEmployeeId = state.team[nextIndex].id;
+      renderAvailabilityMatrix();
+      return;
+    }
+
     const manualDayButton = event.target.closest("[data-manual-mobile-day]");
     if (manualDayButton) {
       selectManualMobileDay(manualDayButton.closest("#manualMasterSheetForm"), manualDayButton.dataset.manualMobileDay);
@@ -3095,6 +3272,11 @@
   });
 
   document.addEventListener("change", (event) => {
+    if (event.target.matches("[data-mobile-availability-employee]")) {
+      state.availabilityMobileEmployeeId = event.target.value;
+      renderAvailabilityMatrix();
+      return;
+    }
     if (event.target.matches("[data-manual-sheet-date], [data-manual-sheet-cell], [data-opening-count]")) syncManualMasterInput(event.target);
     const requestForm = event.target.closest("#requestForm");
     if (requestForm) {

@@ -9,7 +9,7 @@
     <meta name="description" content="Scheduling, requests, training, IC production, and inventory tools for Swensen's management." />
     <meta property="og:title" content="Swensen's Management Hub" />
     <meta property="og:description" content="Schedules, requests, IC production, and inventory in one mobile-friendly hub." />
-    <meta property="og:image" content="https://swensens-management-hub.gsilva0r-sf.chatgpt.site/og.png" />
+    <meta property="og:image" content="https://gsilva0r-gif.github.io/swensens-tools/swensens-brand-logo.png" />
     <meta name="twitter:card" content="summary_large_image" />
     <title>Swensen's Management Hub</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -18,10 +18,11 @@
     <link rel="icon" href="./favicon.svg" />
     <link rel="apple-touch-icon" sizes="180x180" href="./apple-touch-icon.png" />
     <link rel="manifest" href="./manifest.webmanifest" />
-    <link rel="stylesheet" href="./styles.css" />
+    <link rel="stylesheet" href="./styles.css?v=reports-v1" />
   </head>
   <body>
     <div class="stripe" aria-hidden="true"></div>
+
     <main id="loginView" class="login-shell">
       <section class="login-card" aria-labelledby="loginTitle">
         <div class="login-brand">
@@ -75,6 +76,7 @@
           <button class="nav-item active manager-only-nav" data-nav="home"><span>⌂</span>Home</button>
           <button class="nav-item" data-nav="schedule"><span>▦</span>Schedule</button>
           <button class="nav-item" data-nav="inventory"><span>◫</span>Inventory</button>
+          <button class="nav-item manager-only-nav" data-nav="reports"><span>▥</span>Reports</button>
         </aside>
 
         <main class="workspace">
@@ -199,6 +201,11 @@
             <div class="page-title-row"><div><p class="eyebrow">IC tools</p><h2>Inventory</h2><p>Master cans, ½ gallons, production, and records.</p></div></div>
             <div id="inventoryContent" aria-live="polite"></div>
           </section>
+
+          <section id="page-reports" class="page">
+            <div class="page-title-row"><div><p class="eyebrow">Quarterly reporting</p><h2>Production &amp; usage</h2><p>Compare what the store made and used across any date range.</p></div></div>
+            <div id="reportsContent" aria-live="polite"></div>
+          </section>
         </main>
       </div>
 
@@ -206,8 +213,26 @@
         <button class="nav-item active manager-only-nav" data-nav="home"><span>⌂</span>Home</button>
         <button class="nav-item" data-nav="schedule"><span>▦</span>Schedule</button>
         <button class="nav-item" data-nav="inventory"><span>◫</span>Inventory</button>
+        <button class="nav-item manager-only-nav" data-nav="reports"><span>▥</span>Reports</button>
       </nav>
     </div>
+
+    <dialog id="emergencyContactDialog" class="emergency-contact-dialog" aria-labelledby="emergencyContactTitle">
+      <div class="emergency-contact-dialog-shell">
+        <header>
+          <div><p id="emergencyContactEmployee" class="eyebrow">For employee</p><h2 id="emergencyContactTitle">Emergency contact</h2></div>
+          <button class="dialog-close-button" type="button" data-close-emergency-contact aria-label="Close emergency contact">×</button>
+        </header>
+        <div id="emergencyContactCallPanel" class="emergency-contact-call-panel"></div>
+        <form id="emergencyContactForm" class="emergency-contact-form">
+          <label class="field-label">Contact name<input name="contactName" autocomplete="off" maxlength="80" placeholder="Who should we call?" required /></label>
+          <label class="field-label">Relationship to employee<input name="relationship" autocomplete="off" maxlength="60" placeholder="Mother, partner, friend…" required /></label>
+          <label class="field-label">Phone number<input name="phone" type="tel" inputmode="tel" autocomplete="off" maxlength="30" placeholder="(415) 555-0123" required /></label>
+          <p class="emergency-contact-preview-note"><strong>Manager privacy:</strong> emergency-contact changes are stored only on this device for now.</p>
+          <footer><button id="removeEmergencyContact" class="danger-button" type="button" hidden>Remove contact</button><span></span><button class="secondary-button compact" type="button" data-close-emergency-contact>Cancel</button><button class="primary-button compact" type="submit">Save contact</button></footer>
+        </form>
+      </div>
+    </dialog>
 
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
     <div id="printScheduleRoot" aria-hidden="true"></div>
@@ -215,6 +240,6 @@
     <script src="./config.js"></script>
     <script src="./data.js"></script>
     <script src="./scheduler.js"></script>
-    <script src="./app.js"></script>
+    <script src="./app.js?v=reports-v1"></script>
   </body>
 </html>

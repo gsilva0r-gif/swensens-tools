@@ -38,6 +38,13 @@
     databaseHealthMessage: document.querySelector("#databaseHealthMessage"),
     runDatabaseHealthCheck: document.querySelector("#runDatabaseHealthCheck"),
     inventory: document.querySelector("#inventoryContent"),
+    reports: document.querySelector("#reportsContent"),
+    emergencyContactDialog: document.querySelector("#emergencyContactDialog"),
+    emergencyContactForm: document.querySelector("#emergencyContactForm"),
+    emergencyContactTitle: document.querySelector("#emergencyContactTitle"),
+    emergencyContactEmployee: document.querySelector("#emergencyContactEmployee"),
+    emergencyContactCallPanel: document.querySelector("#emergencyContactCallPanel"),
+    removeEmergencyContact: document.querySelector("#removeEmergencyContact"),
   };
 
   const state = {
@@ -95,7 +102,14 @@
     productionScanError: "",
     productionScanNotes: "",
     productionScanUserNote: "",
+    reportStart: "",
+    reportEnd: "",
+    reportData: null,
+    reportLoading: false,
+    reportError: "",
     systemCheckBusy: false,
+    emergencyContacts: {},
+    emergencyContactEmployeeId: "",
   };
 
   const seniorityCodes = [
@@ -133,6 +147,92 @@
     seasonals: "Seasonals",
   };
 
+  function loadInventoryPreviewData() {
+    const previewFlavors = [
+      ["vanilla", "Vanilla", "vanillas", 24, 6, true],
+      ["caramel-marble", "Caramel Marble", "vanillas", 19, 3, true],
+      ["marble-fudge", "Marble Fudge", "vanillas", 12, null, false],
+      ["black-raspberry-marble", "Black Raspberry Marble", "vanillas", 14, null, false],
+      ["cookies-n-cream", "Cookies N Cream", "vanillas", 30, 5, true],
+      ["caramel-turtle-fudge", "Caramel Turtle Fudge", "nuts", 9, 2, true],
+      ["toasted-almond", "Toasted Almond", "nuts", 14, null, false],
+      ["rocky-road", "Rocky Road", "nuts", 11, 4, true],
+      ["cc-cookie-dough", "CC Cookie Dough", "chips", 30, 5, true],
+      ["chocolate-chip", "Chocolate Chip", "chips", 9, null, false],
+      ["raspberry-brownie-chunk", "Raspberry Brownie Chunk", "chips", 12, null, false],
+      ["mocha-chip", "Mocha Chip", "chips", 15, 3, true],
+      ["chocolate", "Chocolate", "chocolates", 18, 4, true],
+      ["swiss-orange-chip", "Swiss Orange Chip", "chocolates", 8, null, false],
+      ["strawberry", "Strawberry", "fruits", 16, 3, true],
+      ["lemon-blueberry", "Lemon Blueberry", "fruits", 10, null, false],
+      ["raspberry-sorbet", "Raspberry Sorbet", "sherbets", 7, 2, true],
+      ["lime-sherbet", "Lime Sherbet", "sherbets", 6, null, false],
+      ["coconut", "Coconut", "seasonals", 5, 1, true],
+      ["peach", "Peach", "seasonals", 4, null, false],
+    ].map(([id, name, category, canCount, halfGallonCount, tracksHalfGallons], index) => ({
+      id: `preview-${id}`,
+      name,
+      category,
+      sort_order: index + 1,
+      tracksHalfGallons,
+      canCount,
+      halfGallonCount,
+      active: true,
+    }));
+    const canDates = ["2026-09-01", "2026-09-03", "2026-09-05", null, null];
+    const halfDates = ["2026-09-01", "2026-09-03", "2026-09-05", null, null];
+    const slots = canDates.map((date, slotIndex) => ({
+      slot_number: slotIndex + 1,
+      can_date: date,
+      half_gallon_date: halfDates[slotIndex],
+      cells: previewFlavors.map((flavor, flavorIndex) => ({
+        flavor_id: flavor.id,
+        can_quantity: date && (flavorIndex + slotIndex) % 4 === 0 ? (flavorIndex % 3) + 1 : 0,
+        half_gallon_quantity: date && flavor.tracksHalfGallons && (flavorIndex + slotIndex) % 5 === 0 ? 1 : 0,
+      })),
+    }));
+    state.inventoryCatalog = previewFlavors;
+    state.inventoryFlavors = previewFlavors;
+    state.productionSheets = [{
+      id: "preview-sheet-1",
+      sheet_number: 7,
+      status: "active",
+      started_on: "2026-09-01",
+      completed_at: null,
+      completed_by_name: null,
+      inventory_snapshot: null,
+      slots,
+    }];
+    state.productionSheetViewId = "preview-sheet-1";
+    state.inventoryHistory = [
+      {
+        id: "preview-usage-can-2", entry_type: "usage", occurred_on: "2026-09-08", note: "Confirmed morning used-can strip", created_by_name: "Gabriel",
+        events: [
+          { flavor_id: "preview-vanilla", inventory_kind: "can", delta: -2, count_before: 26, count_after: 24, flavor_name: "Vanilla" },
+          { flavor_id: "preview-cookies-n-cream", inventory_kind: "can", delta: -3, count_before: 33, count_after: 30, flavor_name: "Cookies N Cream" },
+          { flavor_id: "preview-chocolate", inventory_kind: "can", delta: -1, count_before: 19, count_after: 18, flavor_name: "Chocolate" },
+        ],
+      },
+      {
+        id: "preview-usage-half-1", entry_type: "usage", occurred_on: "2026-09-06", note: "Morning front-freezer refill", created_by_name: "Paul",
+        events: [
+          { flavor_id: "preview-vanilla", inventory_kind: "half_gallon", delta: -1, count_before: 7, count_after: 6, flavor_name: "Vanilla" },
+          { flavor_id: "preview-caramel-marble", inventory_kind: "half_gallon", delta: -2, count_before: 5, count_after: 3, flavor_name: "Caramel Marble" },
+          { flavor_id: "preview-rocky-road", inventory_kind: "half_gallon", delta: -1, count_before: 5, count_after: 4, flavor_name: "Rocky Road" },
+        ],
+      },
+      {
+        id: "preview-usage-can-1", entry_type: "usage", occurred_on: "2026-09-04", note: "Confirmed used-can strip", created_by_name: "Israel",
+        events: [
+          { flavor_id: "preview-cc-cookie-dough", inventory_kind: "can", delta: -2, count_before: 32, count_after: 30, flavor_name: "CC Cookie Dough" },
+          { flavor_id: "preview-strawberry", inventory_kind: "can", delta: -1, count_before: 17, count_after: 16, flavor_name: "Strawberry" },
+        ],
+      },
+    ];
+    state.inventoryLoading = false;
+    state.inventoryError = "";
+  }
+
   function clone(value) {
     return JSON.parse(JSON.stringify(value));
   }
@@ -148,6 +248,7 @@
   }
 
   const demoStorageKey = "swensens-demo-requests-v2";
+  const emergencyContactsStorageKey = "swensens-emergency-contacts-device-v1";
 
   function loadDemoTeam() {
     try {
@@ -168,6 +269,90 @@
     } catch (_) {
       // Demo persistence is a convenience; real accounts save through Supabase.
     }
+  }
+
+  function loadEmergencyContacts() {
+    try {
+      const saved = JSON.parse(window.localStorage.getItem(emergencyContactsStorageKey));
+      return saved && typeof saved === "object" && !Array.isArray(saved) ? saved : {};
+    } catch (_) {
+      return {};
+    }
+  }
+
+  function saveEmergencyContacts() {
+    try {
+      window.localStorage.setItem(emergencyContactsStorageKey, JSON.stringify(state.emergencyContacts));
+    } catch (_) {
+      showToast("This browser could not save the emergency contact.");
+    }
+  }
+
+  function findTeamEmployee(employeeId) {
+    return [...state.team, ...state.hiddenTeam].find((employee) => String(employee.id) === String(employeeId)) || null;
+  }
+
+  function emergencyContactFor(employee) {
+    return employee ? state.emergencyContacts[String(employee.id)] || null : null;
+  }
+
+  function emergencyPhoneHref(value) {
+    const compact = String(value || "").trim().replace(/[^\d+]/g, "");
+    return compact ? `tel:${compact}` : "";
+  }
+
+  function openEmergencyContactDialog(employeeId) {
+    const employee = findTeamEmployee(employeeId);
+    if (!employee || state.role !== "manager" || !elements.emergencyContactDialog) return;
+    const contact = emergencyContactFor(employee);
+    state.emergencyContactEmployeeId = String(employee.id);
+    elements.emergencyContactForm.reset();
+    elements.emergencyContactForm.elements.contactName.value = contact?.name || "";
+    elements.emergencyContactForm.elements.relationship.value = contact?.relationship || "";
+    elements.emergencyContactForm.elements.phone.value = contact?.phone || "";
+    elements.emergencyContactTitle.textContent = `${employee.name}'s emergency contact`;
+    elements.emergencyContactEmployee.textContent = `For ${employee.name}`;
+    elements.removeEmergencyContact.hidden = !contact;
+    elements.emergencyContactCallPanel.innerHTML = contact
+      ? `<a class="emergency-contact-call" href="${emergencyPhoneHref(contact.phone)}"><span aria-hidden="true">☎</span><span><small>Call now</small><strong>${escapeHtml(contact.name)}</strong><b>${escapeHtml(contact.phone)}</b></span></a><p>${escapeHtml(contact.relationship)} to ${escapeHtml(employee.name)}</p>`
+      : `<div class="emergency-contact-empty"><strong>No contact saved yet</strong><span>Add their name, relationship, and phone number below.</span></div>`;
+    elements.emergencyContactDialog.showModal();
+    window.setTimeout(() => elements.emergencyContactForm.elements.contactName.focus(), 80);
+  }
+
+  function closeEmergencyContactDialog() {
+    state.emergencyContactEmployeeId = "";
+    elements.emergencyContactDialog?.close();
+  }
+
+  function saveEmergencyContact(form) {
+    const employee = findTeamEmployee(state.emergencyContactEmployeeId);
+    if (!employee) return;
+    const formData = new FormData(form);
+    const contact = {
+      name: String(formData.get("contactName") || "").trim(),
+      relationship: String(formData.get("relationship") || "").trim(),
+      phone: String(formData.get("phone") || "").trim(),
+    };
+    if (!contact.name || !contact.relationship || !emergencyPhoneHref(contact.phone)) {
+      showToast("Enter the contact's name, relationship, and phone number.");
+      return;
+    }
+    state.emergencyContacts[String(employee.id)] = contact;
+    saveEmergencyContacts();
+    renderTeam();
+    closeEmergencyContactDialog();
+    showToast(`${employee.name}'s emergency contact was saved on this device.`);
+  }
+
+  function removeEmergencyContact() {
+    const employee = findTeamEmployee(state.emergencyContactEmployeeId);
+    if (!employee || !emergencyContactFor(employee)) return;
+    delete state.emergencyContacts[String(employee.id)];
+    saveEmergencyContacts();
+    renderTeam();
+    closeEmergencyContactDialog();
+    showToast(`${employee.name}'s emergency contact was removed.`);
   }
 
   function escapeHtml(value) {
@@ -518,6 +703,11 @@
     state.productionScanError = "";
     state.productionScanNotes = "";
     state.productionScanUserNote = "";
+    state.reportStart = "";
+    state.reportEnd = "";
+    state.reportData = null;
+    state.reportLoading = false;
+    state.reportError = "";
     state.systemCheckBusy = false;
     elements.databaseHealthPanel.hidden = true;
     elements.appView.classList.remove("employee-mode");
@@ -569,6 +759,7 @@
     renderScheduleModule();
     renderScheduleResults();
     renderInventory();
+    renderReports();
   }
 
   function renderDashboard() {
@@ -637,6 +828,25 @@
     if (!value) return "Today";
     return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" })
       .format(new Date(`${value}T12:00:00`));
+  }
+
+  function reportIsoDate(date) {
+    return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}-${String(date.getUTCDate()).padStart(2, "0")}`;
+  }
+
+  function reportQuarterRange(quarterOffset = 0) {
+    const [year, month] = inventoryDateValue().split("-").map(Number);
+    const startMonth = Math.floor((month - 1) / 3) * 3 + quarterOffset * 3;
+    const start = new Date(Date.UTC(year, startMonth, 1));
+    const end = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + 3, 0));
+    return { start: reportIsoDate(start), end: reportIsoDate(end) };
+  }
+
+  function ensureReportRange() {
+    if (state.reportStart && state.reportEnd) return;
+    const range = reportQuarterRange();
+    state.reportStart = range.start;
+    state.reportEnd = range.end;
   }
 
   function inventoryGroupedMarkup(flavors, rowRenderer) {
@@ -738,6 +948,44 @@
     }).join("");
   }
 
+  function mobileProductionMaster(sheetFlavors, slots) {
+    const productionCell = (slot, flavor, kind) => {
+      const cell = productionSheetCell(slot, flavor.id);
+      const value = kind === "can" ? cell?.can_quantity : cell?.half_gallon_quantity;
+      return `<td>${Number(value) > 0 ? value : ""}</td>`;
+    };
+    const rows = inventoryPaperRows(sheetFlavors, 13, (flavor) => `<tr>
+      <th scope="row">${escapeHtml(flavor.name)}</th>
+      <td class="mobile-sheet-current-count">${Number.isInteger(flavor.canCount) ? flavor.canCount : "—"}</td>
+      ${slots.map((slot) => productionCell(slot, flavor, "can")).join("")}
+      <td class="mobile-sheet-half-divider"></td>
+      ${slots.map((slot) => productionCell(slot, flavor, "half_gallon")).join("")}
+    </tr>`);
+    return `<div class="inventory-mobile-master production-mobile-master" aria-label="Complete mobile production master sheet">
+      <div class="mobile-full-sheet-label"><strong>Full 5-day master sheet</strong><span>All columns shown</span></div>
+      <div class="mobile-production-sheet-frame">
+        <table class="mobile-production-sheet">
+          <caption>Full-can master count with five can-production dates and five half-gallon production dates</caption>
+          <colgroup><col class="mobile-sheet-flavor-col"><col class="mobile-sheet-count-col">${slots.map(() => '<col class="mobile-sheet-day-col">').join("")}<col class="mobile-sheet-divider-col">${slots.map(() => '<col class="mobile-sheet-day-col">').join("")}</colgroup>
+          <thead>
+            <tr><th rowspan="2" scope="col">Flavor</th><th rowspan="2" scope="col">Cans</th><th colspan="5" scope="colgroup">Cans made</th><th rowspan="2" scope="col" class="mobile-sheet-half-divider">½ gal</th><th colspan="5" scope="colgroup">½ gallons made</th></tr>
+            <tr class="mobile-sheet-date-row">${slots.map((slot) => `<th scope="col">${inventoryShortDate(slot.can_date)}</th>`).join("")}${slots.map((slot) => `<th scope="col">${inventoryShortDate(slot.half_gallon_date)}</th>`).join("")}</tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    </div>`;
+  }
+
+  function mobileHalfGallonMaster(flavors) {
+    const groups = Object.entries(inventoryCategoryLabels).map(([category, label]) => {
+      const rows = flavors.filter((flavor) => flavor.category === category);
+      if (!rows.length) return "";
+      return `<section class="mobile-master-category"><header><strong>${label}</strong><span>${rows.length} flavor${rows.length === 1 ? "" : "s"}</span></header><div>${rows.map((flavor) => `<article class="mobile-half-gallon-row"><span>${escapeHtml(flavor.name)}</span><strong class="${Number.isInteger(flavor.halfGallonCount) ? "" : "missing"}">${Number.isInteger(flavor.halfGallonCount) ? flavor.halfGallonCount : "Count needed"}</strong></article>`).join("")}</div></section>`;
+    }).join("");
+    return `<div class="inventory-mobile-master half-gallon-mobile-master" aria-label="Mobile half-gallon count sheet">${groups}</div>`;
+  }
+
   function renderInventoryMaster() {
     const kind = state.inventoryMasterView;
     const isHalfGallons = kind === "half_gallon";
@@ -753,7 +1001,7 @@
     };
     const sheetChoices = state.productionSheets.map((item) => `<option value="${item.id}" ${item.id === sheet?.id ? "selected" : ""}>Sheet #${item.sheet_number}${item.status === "active" ? " · Current" : " · Complete"}</option>`).join("");
     const daysUsed = productionSheetDaysUsed(sheet);
-    const productionSheet = `<div class="inventory-paper-scroll" aria-label="Production master sheet. Scroll sideways to see all date columns.">
+    const productionSheet = `<div class="inventory-paper-scroll inventory-desktop-master" aria-label="Production master sheet with all date columns.">
       <table class="inventory-paper-table production-master-sheet">
         <caption>Full-can master count with five can-production dates and five half-gallon production dates</caption>
         <thead><tr>
@@ -771,7 +1019,7 @@
         </tr>`)}</tbody>
       </table>
     </div>`;
-    const halfGallonSheet = `<div class="inventory-paper-scroll half-gallon-paper-scroll">
+    const halfGallonSheet = `<div class="inventory-paper-scroll half-gallon-paper-scroll inventory-desktop-master">
       <table class="inventory-paper-table half-gallon-master-sheet">
         <caption>Current half-gallon inventory by flavor</caption>
         <thead><tr><th scope="col">Flavors</th><th scope="col">½ Gallons</th></tr></thead>
@@ -787,8 +1035,8 @@
         </div>
       </div>
       ${!isHalfGallons && sheetChoices ? `<div class="production-sheet-toolbar"><label>Digital sheet<select data-production-sheet-view>${sheetChoices}</select></label><span>${sheet?.status === "complete" ? `Archived · ${productionSheetDateRange(sheet)}` : `${daysUsed} / 5 production days`}</span><div class="production-sheet-actions"><button type="button" class="secondary-button compact" data-print-production-sheet="${sheet.id}">Print / Save PDF</button>${sheet?.status === "complete" ? `<button type="button" class="secondary-button compact" data-download-production-sheet="${sheet.id}">Download data</button>` : ""}${sheet?.id === activeSheet?.id && daysUsed === 5 ? `<button type="button" class="primary-button compact" data-archive-production-sheet>Complete & archive</button>` : ""}</div></div>` : ""}
-      ${isHalfGallons ? halfGallonSheet : productionSheet}
-      <p class="inventory-paper-note">${isHalfGallons ? "This count changes whenever ½ gallons are made, used, or physically corrected." : sheet?.status === "complete" ? "Archived sheets stay read-only. Print them again or download their structured data at any time." : "Production entries automatically fill these date columns. On a phone, swipe the sheet sideways to see every column."}</p>
+      ${isHalfGallons ? `${halfGallonSheet}${mobileHalfGallonMaster(halfFlavors)}` : `${productionSheet}${mobileProductionMaster(sheetFlavors, slots)}`}
+      <p class="inventory-paper-note">${isHalfGallons ? "This count changes whenever ½ gallons are made, used, or physically corrected." : sheet?.status === "complete" ? "Archived sheets stay read-only. Print them again or download their structured data at any time." : "Production entries automatically fill the complete five-day sheet on both phone and laptop."}</p>
     </section>`;
   }
 
@@ -892,6 +1140,13 @@
     </details>`;
   }
 
+  function renderManualMobileHalfCounts() {
+    const halfFlavors = state.inventoryFlavors.filter((flavor) => flavor.tracksHalfGallons);
+    return `<div class="manual-mobile-count-list manual-half-count-mobile">
+      ${inventoryGroupedMarkup(halfFlavors, (flavor) => `<label class="manual-mobile-count-row"><span>${escapeHtml(flavor.name)}</span>${openingCountInput(flavor, "half_gallon")}</label>`)}
+    </div>`;
+  }
+
   function renderOpeningCountForm(missingUnitCount) {
     const sheet = activeProductionSheet();
     const slots = productionSheetSlots(sheet);
@@ -946,8 +1201,9 @@
           </div>
           <details class="manual-half-counts">
             <summary>Correct current ½-gallon totals</summary>
-            <p>The paper production grid above records what was made. This smaller table matches the separate physical ½-gallon count list.</p>
-            <div class="inventory-paper-scroll opening-count-scroll">
+            <p>Enter the exact physical count beside each flavor. Use 0 when a flavor is empty.</p>
+            ${renderManualMobileHalfCounts()}
+            <div class="inventory-paper-scroll opening-count-scroll manual-half-count-desktop">
               <table class="inventory-paper-table opening-count-table reusable-count-table">
                 <caption>Corrected physical half-gallon counts</caption>
                 <thead><tr><th scope="col">Flavors</th><th scope="col">Current ½ Gallons</th></tr></thead>
@@ -986,20 +1242,20 @@
 
   function renderInventoryEntryForm() {
     const mode = state.inventoryEntryMode;
-    const title = mode === "production" ? "Add today's production" : mode === "usage_can" ? "Record full cans used" : "Record ½ gallons used";
+    const title = mode === "production" ? "Add today's production" : mode === "usage_can" ? "Record full cans used" : "Record morning ½-gallon refill";
     const copy = mode === "production"
       ? "Enter the full cans and ½-gallon tubs made for each flavor. Both master lists update together."
       : mode === "usage_can"
         ? "Enter each flavor from the paper strip. Repeated names become a larger quantity; circled or crossed-out names are already accounted for and stay out."
-        : "Manually enter the ½-gallon tubs used from the morning post-it note.";
-    const submitLabel = mode === "production" ? "Add production" : mode === "usage_can" ? "Subtract used cans" : "Subtract used ½ gallons";
+        : "Enter the tubs listed for the morning front-freezer refill. Because each flavor is restored to four, every tub brought up from the freezer room counts as one ½ gallon used.";
+    const submitLabel = mode === "production" ? "Add production" : mode === "usage_can" ? "Subtract used cans" : "Save refill list";
     const flavors = mode === "usage_half_gallon" ? state.inventoryFlavors.filter((flavor) => flavor.tracksHalfGallons) : state.inventoryFlavors;
     const dual = mode === "production";
     return `<section class="panel inventory-entry-panel">
       <div class="inventory-mode-tabs" role="tablist" aria-label="Inventory entry type">
         <button type="button" data-inventory-mode="production" class="${mode === "production" ? "active" : ""}">+ Production</button>
         <button type="button" data-inventory-mode="usage_can" class="${mode === "usage_can" ? "active" : ""}">− Used cans</button>
-        <button type="button" data-inventory-mode="usage_half_gallon" class="${mode === "usage_half_gallon" ? "active" : ""}">− Used ½ gal</button>
+        <button type="button" data-inventory-mode="usage_half_gallon" class="${mode === "usage_half_gallon" ? "active" : ""}">½-gal refill</button>
       </div>
       <form id="inventoryEntryForm" data-entry-mode="${mode}" class="inventory-count-form">
         <div class="panel-heading"><div><p class="eyebrow">New ledger entry</p><h3>${title}</h3><p>${copy}</p></div></div>
@@ -1250,18 +1506,36 @@
     const rows = state.inventoryHistory.map((batch) => {
       const changes = batch.events.map((event) => {
         const unit = event.inventory_kind === "half_gallon" ? "½ gal" : "cans";
-        if (batch.entry_type === "opening") return `${escapeHtml(event.flavor_name)} ${unit} set to ${event.count_after}`;
-        if (batch.entry_type === "count_adjustment" || batch.entry_type === "manual_recount") return `${escapeHtml(event.flavor_name)} ${unit} ${event.count_before} → ${event.count_after}`;
-        return `${escapeHtml(event.flavor_name)} ${unit} ${event.delta > 0 ? "+" : ""}${event.delta}`;
-      }).join(" · ");
-      return `<article class="inventory-history-row"><div><span class="inventory-history-type ${batch.entry_type}">${entryLabels[batch.entry_type] || "Inventory"}</span><strong>${inventoryDateLabel(batch.occurred_on)} · ${escapeHtml(batch.created_by_name)}</strong><p>${changes}</p>${batch.entry_type === "manual_recount" ? `<small class="manual-log-note">Entered manually — not calculated from production or usage.</small>` : ""}${batch.note ? `<small>${escapeHtml(batch.note)}</small>` : ""}</div></article>`;
+        const before = event.count_before === null || event.count_before === undefined ? "—" : event.count_before;
+        const after = event.count_after === null || event.count_after === undefined ? "—" : event.count_after;
+        const numericDelta = Number(event.delta);
+        const delta = Number.isFinite(numericDelta) ? `${numericDelta > 0 ? "+" : ""}${numericDelta}` : "—";
+        const deltaClass = numericDelta > 0 ? "positive" : numericDelta < 0 ? "negative" : "";
+        return `<li class="inventory-history-change">
+          <div class="inventory-history-flavor"><strong>${escapeHtml(event.flavor_name)}</strong><span>${unit}</span></div>
+          <span class="inventory-history-value"><small>Before</small><b>${before}</b></span>
+          <span class="inventory-history-arrow" aria-hidden="true">→</span>
+          <span class="inventory-history-value"><small>After</small><b>${after}</b></span>
+          <span class="inventory-history-delta ${deltaClass}">${delta}</span>
+        </li>`;
+      }).join("");
+      return `<article class="inventory-history-row">
+        <header><span class="inventory-history-type ${batch.entry_type}">${entryLabels[batch.entry_type] || "Inventory"}</span><time>${inventoryDateLabel(batch.occurred_on)}</time></header>
+        <div class="inventory-history-meta"><span><small>Changed by</small><strong>${escapeHtml(batch.created_by_name)}</strong></span><span><small>Changes</small><strong>${batch.events.length}</strong></span></div>
+        <ul class="inventory-history-changes">${changes}</ul>
+        ${batch.entry_type === "manual_recount" ? `<p class="manual-log-note">Manual physical count—not calculated from production or usage.</p>` : ""}
+        ${batch.note ? `<p class="inventory-history-note"><strong>Note</strong><span>${escapeHtml(batch.note)}</span></p>` : ""}
+      </article>`;
     }).join("");
-    return `<section class="panel inventory-history-panel"><div class="panel-heading"><div><p class="eyebrow">Audit history</p><h3>Recent master-list changes</h3><p>Who changed what, when, which unit changed, and the before/after totals.</p></div></div>${rows || `<div class="inventory-empty">No inventory changes have been recorded yet.</div>`}</section>`;
+    return `<details class="panel inventory-collapsible inventory-history-panel">
+      <summary><span><strong>Audit history</strong><small>See who changed each flavor and compare the before and after counts.</small></span><span class="collapsible-summary-status"><b>${state.inventoryHistory.length} recent</b><i class="collapsible-arrow" aria-hidden="true">⌄</i></span></summary>
+      <div class="inventory-collapsible-body inventory-history-body">${rows || `<div class="inventory-empty">No inventory changes have been recorded yet.</div>`}</div>
+    </details>`;
   }
 
   function renderInventory() {
     if (!elements.inventory || !state.canAccessInventory) return;
-    if (state.mode === "demo") {
+    if (state.mode === "demo" && !state.inventoryFlavors.length) {
       elements.inventory.innerHTML = `<section class="inventory-preview"><div class="inventory-scoops" aria-hidden="true"><i></i><i></i><i></i></div><h3>Sign in to use the live master inventory.</h3><p>The real manager and IC-maker accounts share full-can and ½-gallon counts, production, usage, and audit history.</p></section>`;
       return;
     }
@@ -1294,6 +1568,256 @@
       ${missingUnitCount ? "" : renderInventoryEntryForm()}
       ${renderFlavorManager()}
       ${renderInventoryHistory()}`;
+  }
+
+  function reportRowMap() {
+    return new Map(state.inventoryCatalog.map((flavor) => [flavor.id, {
+      id: flavor.id,
+      name: flavor.name,
+      category: flavor.category,
+      sortOrder: Number(flavor.sort_order) || 0,
+      cansMade: 0,
+      cansUsed: 0,
+      halfGallonsMade: 0,
+      halfGallonsUsed: 0,
+    }]));
+  }
+
+  function reportRowFor(rows, flavorId) {
+    if (!rows.has(flavorId)) {
+      rows.set(flavorId, {
+        id: flavorId,
+        name: "Removed flavor",
+        category: "seasonals",
+        sortOrder: 9999,
+        cansMade: 0,
+        cansUsed: 0,
+        halfGallonsMade: 0,
+        halfGallonsUsed: 0,
+      });
+    }
+    return rows.get(flavorId);
+  }
+
+  function buildInventoryReport(start, end, canSlots, halfSlots, usageBatches, usageEvents) {
+    const rows = reportRowMap();
+    const sheetIds = new Set();
+    const productionDays = new Set();
+    const usageKindsByBatch = new Map();
+    const slotCells = (slot) => slot.ice_cream_production_cells || slot.cells || [];
+
+    canSlots.forEach((slot) => {
+      if (!slot.can_date || slot.can_date < start || slot.can_date > end) return;
+      if (slot.sheet_id) sheetIds.add(slot.sheet_id);
+      productionDays.add(slot.can_date);
+      slotCells(slot).forEach((cell) => {
+        reportRowFor(rows, cell.flavor_id).cansMade += Number(cell.can_quantity) || 0;
+      });
+    });
+    halfSlots.forEach((slot) => {
+      if (!slot.half_gallon_date || slot.half_gallon_date < start || slot.half_gallon_date > end) return;
+      if (slot.sheet_id) sheetIds.add(slot.sheet_id);
+      productionDays.add(slot.half_gallon_date);
+      slotCells(slot).forEach((cell) => {
+        reportRowFor(rows, cell.flavor_id).halfGallonsMade += Number(cell.half_gallon_quantity) || 0;
+      });
+    });
+    usageEvents.forEach((event) => {
+      const kind = event.inventory_kind === "half_gallon" ? "half_gallon" : "can";
+      const row = reportRowFor(rows, event.flavor_id);
+      const quantity = Math.abs(Number(event.delta) || 0);
+      if (kind === "half_gallon") row.halfGallonsUsed += quantity;
+      else row.cansUsed += quantity;
+      const kinds = usageKindsByBatch.get(event.batch_id) || new Set();
+      kinds.add(kind);
+      usageKindsByBatch.set(event.batch_id, kinds);
+    });
+
+    const categoryOrder = new Map(Object.keys(inventoryCategoryLabels).map((category, index) => [category, index]));
+    const activityRows = [...rows.values()].filter((row) => row.cansMade || row.cansUsed || row.halfGallonsMade || row.halfGallonsUsed)
+      .sort((a, b) => (categoryOrder.get(a.category) ?? 99) - (categoryOrder.get(b.category) ?? 99) || a.sortOrder - b.sortOrder || a.name.localeCompare(b.name));
+    const totals = activityRows.reduce((sum, row) => ({
+      cansMade: sum.cansMade + row.cansMade,
+      cansUsed: sum.cansUsed + row.cansUsed,
+      halfGallonsMade: sum.halfGallonsMade + row.halfGallonsMade,
+      halfGallonsUsed: sum.halfGallonsUsed + row.halfGallonsUsed,
+    }), { cansMade: 0, cansUsed: 0, halfGallonsMade: 0, halfGallonsUsed: 0 });
+    return {
+      start,
+      end,
+      rows: activityRows,
+      totals,
+      sources: {
+        masterSheets: sheetIds.size,
+        productionDays: productionDays.size,
+        canStrips: usageBatches.filter((batch) => usageKindsByBatch.get(batch.id)?.has("can")).length,
+        halfGallonRefills: usageBatches.filter((batch) => usageKindsByBatch.get(batch.id)?.has("half_gallon")).length,
+      },
+    };
+  }
+
+  async function fetchReportSlots(dateField, start, end) {
+    const rows = [];
+    const pageSize = 500;
+    for (let from = 0; ; from += pageSize) {
+      const { data, error } = await supabaseClient.from("ice_cream_production_slots")
+        .select("sheet_id, slot_number, can_date, half_gallon_date, ice_cream_production_cells(flavor_id, can_quantity, half_gallon_quantity)")
+        .gte(dateField, start).lte(dateField, end).order(dateField).order("sheet_id").order("slot_number").range(from, from + pageSize - 1);
+      if (error) throw error;
+      rows.push(...(data || []));
+      if (!data || data.length < pageSize) break;
+    }
+    return rows;
+  }
+
+  async function fetchReportUsage(start, end) {
+    const batches = [];
+    const pageSize = 500;
+    for (let from = 0; ; from += pageSize) {
+      const { data, error } = await supabaseClient.from("ice_cream_inventory_batches")
+        .select("id, occurred_on, note, created_by_name")
+        .eq("entry_type", "usage").gte("occurred_on", start).lte("occurred_on", end)
+        .order("occurred_on").order("id").range(from, from + pageSize - 1);
+      if (error) throw error;
+      batches.push(...(data || []));
+      if (!data || data.length < pageSize) break;
+    }
+    const events = [];
+    const batchIds = batches.map((batch) => batch.id);
+    for (let index = 0; index < batchIds.length; index += 100) {
+      const ids = batchIds.slice(index, index + 100);
+      for (let from = 0; ; from += pageSize) {
+        const { data, error } = await supabaseClient.from("ice_cream_inventory_events")
+          .select("id, batch_id, flavor_id, inventory_kind, delta")
+          .in("batch_id", ids).order("id").range(from, from + pageSize - 1);
+        if (error) throw error;
+        events.push(...(data || []));
+        if (!data || data.length < pageSize) break;
+      }
+    }
+    return { batches, events };
+  }
+
+  function loadedReportSources(start, end) {
+    const canSlots = [];
+    const halfSlots = [];
+    state.productionSheets.forEach((sheet) => (sheet.slots || []).forEach((slot) => {
+      const source = { ...slot, sheet_id: sheet.id };
+      if (slot.can_date >= start && slot.can_date <= end) canSlots.push(source);
+      if (slot.half_gallon_date >= start && slot.half_gallon_date <= end) halfSlots.push(source);
+    }));
+    const batches = state.inventoryHistory.filter((batch) => batch.entry_type === "usage" && batch.occurred_on >= start && batch.occurred_on <= end);
+    const events = batches.flatMap((batch) => batch.events.map((event) => ({ ...event, batch_id: batch.id })));
+    return { canSlots, halfSlots, batches, events };
+  }
+
+  async function loadInventoryReport() {
+    if (state.role !== "manager" || state.reportLoading) return;
+    ensureReportRange();
+    if (state.reportStart > state.reportEnd) {
+      state.reportError = "The start date must be before the end date.";
+      state.reportData = null;
+      renderReports();
+      return;
+    }
+    state.reportLoading = true;
+    state.reportError = "";
+    renderReports();
+    try {
+      let sources;
+      if (state.mode === "supabase") {
+        const [canSlots, halfSlots, usage] = await Promise.all([
+          fetchReportSlots("can_date", state.reportStart, state.reportEnd),
+          fetchReportSlots("half_gallon_date", state.reportStart, state.reportEnd),
+          fetchReportUsage(state.reportStart, state.reportEnd),
+        ]);
+        sources = { canSlots, halfSlots, batches: usage.batches, events: usage.events };
+      } else {
+        sources = loadedReportSources(state.reportStart, state.reportEnd);
+      }
+      state.reportData = buildInventoryReport(state.reportStart, state.reportEnd, sources.canSlots, sources.halfSlots, sources.batches, sources.events);
+    } catch (error) {
+      state.reportData = null;
+      state.reportError = error?.message || "The report records could not be loaded.";
+    }
+    state.reportLoading = false;
+    renderReports();
+  }
+
+  function reportNetClass(value) {
+    return value > 0 ? "positive" : value < 0 ? "negative" : "";
+  }
+
+  function renderReportRows(report) {
+    if (!report.rows.length) return `<div class="report-empty"><strong>No recorded activity in this period</strong><span>Choose a wider date range or confirm that master sheets and usage lists were saved.</span></div>`;
+    const desktopGroups = Object.entries(inventoryCategoryLabels).map(([category, label]) => {
+      const rows = report.rows.filter((row) => row.category === category);
+      if (!rows.length) return "";
+      return `<tr class="report-category-row"><th colspan="7">${label}</th></tr>${rows.map((row) => {
+        const canNet = row.cansMade - row.cansUsed;
+        const halfNet = row.halfGallonsMade - row.halfGallonsUsed;
+        return `<tr><th scope="row">${escapeHtml(row.name)}</th><td>${row.cansMade}</td><td>${row.cansUsed}</td><td class="report-net ${reportNetClass(canNet)}">${canNet > 0 ? "+" : ""}${canNet}</td><td>${row.halfGallonsMade}</td><td>${row.halfGallonsUsed}</td><td class="report-net ${reportNetClass(halfNet)}">${halfNet > 0 ? "+" : ""}${halfNet}</td></tr>`;
+      }).join("")}`;
+    }).join("");
+    const mobileRows = report.rows.map((row) => {
+      const canNet = row.cansMade - row.cansUsed;
+      const halfNet = row.halfGallonsMade - row.halfGallonsUsed;
+      return `<article class="report-flavor-card"><header><strong>${escapeHtml(row.name)}</strong><span>${inventoryCategoryLabels[row.category] || row.category}</span></header><div class="report-flavor-units"><section><h4>Full cans</h4><div><span><small>Made</small><b>${row.cansMade}</b></span><span><small>Used</small><b>${row.cansUsed}</b></span><span class="report-net ${reportNetClass(canNet)}"><small>Net</small><b>${canNet > 0 ? "+" : ""}${canNet}</b></span></div></section><section><h4>½ gallons</h4><div><span><small>Made</small><b>${row.halfGallonsMade}</b></span><span><small>Used</small><b>${row.halfGallonsUsed}</b></span><span class="report-net ${reportNetClass(halfNet)}"><small>Net</small><b>${halfNet > 0 ? "+" : ""}${halfNet}</b></span></div></section></div></article>`;
+    }).join("");
+    return `<div class="report-desktop-table"><table class="report-table"><caption>Flavor production and usage totals</caption><thead><tr><th rowspan="2">Flavor</th><th colspan="3">Full cans</th><th colspan="3">½ gallons</th></tr><tr><th>Made</th><th>Used</th><th>Net</th><th>Made</th><th>Used</th><th>Net</th></tr></thead><tbody>${desktopGroups}</tbody></table></div><div class="report-mobile-list">${mobileRows}</div>`;
+  }
+
+  function renderReports() {
+    if (!elements.reports || state.role !== "manager") return;
+    ensureReportRange();
+    const report = state.reportData;
+    const currentQuarter = reportQuarterRange();
+    const lastQuarter = reportQuarterRange(-1);
+    const currentYear = inventoryDateValue().slice(0, 4);
+    const presetClass = (start, end) => state.reportStart === start && state.reportEnd === end ? "active" : "";
+    const results = state.reportLoading
+      ? `<div class="report-loading"><strong>Building report…</strong><span>Reading master sheets, can strips, and refill lists.</span></div>`
+      : state.reportError
+        ? `<div class="report-error"><strong>Report could not be created</strong><span>${escapeHtml(state.reportError)}</span></div>`
+        : report
+          ? `<section class="report-summary-grid"><article><span>Full cans made</span><strong>${report.totals.cansMade}</strong></article><article><span>Full cans used</span><strong>${report.totals.cansUsed}</strong></article><article><span>½ gallons made</span><strong>${report.totals.halfGallonsMade}</strong></article><article><span>½ gallons used</span><strong>${report.totals.halfGallonsUsed}</strong></article></section>
+            <section class="panel report-results-panel"><div class="report-results-heading"><div><p class="eyebrow">${inventoryDateLabel(report.start)} – ${inventoryDateLabel(report.end)}</p><h3>Flavor totals</h3><p>Made totals come from dated master-sheet columns. Used totals come from confirmed can strips and morning ½-gallon refill lists.</p></div><button type="button" class="secondary-button compact" data-download-report>Download CSV</button></div><div class="report-source-strip"><span><strong>${report.sources.masterSheets}</strong> master sheets</span><span><strong>${report.sources.productionDays}</strong> production days</span><span><strong>${report.sources.canStrips}</strong> used-can strips</span><span><strong>${report.sources.halfGallonRefills}</strong> refill lists</span></div>${renderReportRows(report)}</section>`
+          : `<div class="report-empty"><strong>Choose a reporting period</strong><span>The report will combine production and usage by flavor.</span></div>`;
+    elements.reports.innerHTML = `<section class="panel report-range-panel"><form id="reportRangeForm"><div class="report-range-heading"><div><p class="eyebrow">Reporting period</p><h3>Choose any dates</h3></div><div class="report-presets"><button type="button" class="${presetClass(currentQuarter.start, currentQuarter.end)}" data-report-preset="current">This quarter</button><button type="button" class="${presetClass(lastQuarter.start, lastQuarter.end)}" data-report-preset="last">Last quarter</button><button type="button" class="${presetClass(`${currentYear}-01-01`, `${currentYear}-12-31`)}" data-report-preset="year">This year</button></div></div><div class="report-date-fields"><label>From<input name="reportStart" type="date" value="${state.reportStart}" required></label><label>Through<input name="reportEnd" type="date" value="${state.reportEnd}" required></label><button class="primary-button compact" type="submit" ${state.reportLoading ? "disabled" : ""}>Generate report</button></div></form></section>${results}<section class="panel report-refill-panel"><div><p class="eyebrow">Daily ½-gallon usage</p><h3>Morning front-freezer refill</h3><p>The front freezer is stocked four high per flavor. Record every tub brought up from the freezer room; that quantity is counted as used for the report.</p></div><button type="button" class="primary-button compact" data-open-half-gallon-refill>Open refill list</button></section>`;
+  }
+
+  function setReportPreset(preset) {
+    let range;
+    if (preset === "last") range = reportQuarterRange(-1);
+    else if (preset === "year") {
+      const year = inventoryDateValue().slice(0, 4);
+      range = { start: `${year}-01-01`, end: `${year}-12-31` };
+    } else range = reportQuarterRange();
+    state.reportStart = range.start;
+    state.reportEnd = range.end;
+    state.reportData = null;
+    loadInventoryReport();
+  }
+
+  function downloadInventoryReport() {
+    const report = state.reportData;
+    if (!report) return;
+    const rows = [["period_start", "period_end", "flavor", "category", "full_cans_made", "full_cans_used", "full_can_net", "half_gallons_made", "half_gallons_used", "half_gallon_net"]];
+    report.rows.forEach((row) => rows.push([
+      report.start, report.end, row.name, inventoryCategoryLabels[row.category] || row.category,
+      row.cansMade, row.cansUsed, row.cansMade - row.cansUsed,
+      row.halfGallonsMade, row.halfGallonsUsed, row.halfGallonsMade - row.halfGallonsUsed,
+    ]));
+    const blob = new Blob([rows.map((row) => row.map(csvCell).join(",")).join("\n")], { type: "text/csv;charset=utf-8" });
+    const blobUrl = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = blobUrl;
+    link.download = `swensens-inventory-report-${report.start}-to-${report.end}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(blobUrl);
+    showToast("Report downloaded for data analysis.");
   }
 
   async function loadInventoryData() {
@@ -1364,6 +1888,7 @@
         flavor_name: Array.isArray(event.ice_cream_flavors) ? event.ice_cream_flavors[0]?.name : event.ice_cream_flavors?.name,
       })),
     }));
+    state.reportData = null;
     state.inventoryLoading = false;
   }
 
@@ -2416,6 +2941,7 @@
 
   function renderTeamCard(employee, hidden = false) {
     const skills = employee.skills.length ? employee.skills : ["team_member"];
+    const emergencyContact = emergencyContactFor(employee);
     const accessLabel = hidden ? "Hidden" : employee.hasLogin ? "Portal ready" : "Setup needed";
     const accessClass = hidden || !employee.hasLogin ? "missing" : "submitted";
     const actions = hidden
@@ -2425,6 +2951,7 @@
       <div class="team-card-heading"><div><h3>${escapeHtml(employee.name)}</h3><p>${escapeHtml(employee.code || "No employee ID")}</p></div><span class="request-status ${accessClass}">${accessLabel}</span></div>
       <p>${employee.minDays}–${employee.maxDays} requested working days</p>
       <div class="skill-tags">${skills.map((skill) => `<span class="${skill === "key_holder" ? "key" : skill === "ic_maker" ? "ic" : skill === "trainer" ? "train" : ""}">${skill === "team_member" ? "Team member" : roleLabel(skill)}</span>`).join("")}</div>
+      ${state.role === "manager" ? `<button class="emergency-contact-button ${emergencyContact ? "saved" : "missing"}" type="button" data-emergency-contact="${employee.id}" aria-label="${emergencyContact ? `Open ${escapeHtml(employee.name)}'s emergency contact` : `Add an emergency contact for ${escapeHtml(employee.name)}`}"><span class="emergency-contact-icon" aria-hidden="true">☎</span><span class="emergency-contact-copy"><small>Emergency contact</small><strong>${emergencyContact ? escapeHtml(emergencyContact.name) : "Add contact"}</strong><b>${emergencyContact ? `${escapeHtml(emergencyContact.relationship)} · ${escapeHtml(emergencyContact.phone)}` : "Name, relationship, and phone"}</b></span><span class="emergency-contact-arrow" aria-hidden="true">›</span></button>` : ""}
       ${state.role === "manager" ? `<div class="employee-card-actions">${actions}</div>` : ""}
     </article>`;
   }
@@ -2975,7 +3502,9 @@
   async function initialize() {
     const today = new Intl.DateTimeFormat("en-US", { weekday: "long", month: "long", day: "numeric" }).format(new Date());
     document.querySelector("#todayLabel").textContent = today;
-    const previewMode = window.location.hostname === "terminal.local" && new URLSearchParams(window.location.search).get("preview") === "schedule";
+    state.emergencyContacts = loadEmergencyContacts();
+    const previewView = new URLSearchParams(window.location.search).get("preview");
+    const previewMode = window.location.hostname === "terminal.local" && ["schedule", "inventory", "team", "reports"].includes(previewView);
     if (previewMode) {
       state.mode = "demo";
       const previewByCode = new Map(demoData.team.map((employee) => [employee.code, clone(employee)]));
@@ -2987,8 +3516,14 @@
         .map((employee) => ({ ...employee, active: false, hasLogin: true }))
         .sort((a, b) => a.name.localeCompare(b.name));
       state.scheduleModuleView = "availability";
+      if (previewView === "inventory" || previewView === "reports") loadInventoryPreviewData();
+      if (previewView === "team" && !state.emergencyContacts["demo-paul"]) {
+        state.emergencyContacts["demo-paul"] = { name: "Sample Contact", relationship: "Mother", phone: "(415) 555-0142" };
+      }
       openApp({ id: "preview-manager", employee_code: "SWENSENSMANAGER", display_name: "Manager Preview", account_role: "manager", skills: ["manager"] });
-      navigate("schedule");
+      navigate(previewView === "inventory" ? "inventory" : previewView === "reports" ? "reports" : previewView === "team" ? "home" : "schedule");
+      if (previewView === "team") document.querySelector("#homeTeamDrawer").open = true;
+      if (previewView === "reports") loadInventoryReport();
       return;
     }
     if (!supabaseClient) return;
@@ -3007,6 +3542,10 @@
   elements.loginForm.addEventListener("submit", handleLogin);
   elements.logoutButton.addEventListener("click", closeApp);
   elements.runDatabaseHealthCheck.addEventListener("click", runDatabaseHealthCheck);
+  elements.removeEmergencyContact.addEventListener("click", removeEmergencyContact);
+  elements.emergencyContactDialog.addEventListener("cancel", () => {
+    state.emergencyContactEmployeeId = "";
+  });
   elements.showEmployeeAccountForm.addEventListener("click", () => {
     state.showingEmployeeAccountForm = !state.showingEmployeeAccountForm;
     renderEmployeeAccountManager();
@@ -3015,6 +3554,16 @@
   document.querySelector("#generateButtonTop").addEventListener("click", generateSchedules);
 
   document.addEventListener("click", (event) => {
+    const emergencyContactButton = event.target.closest("[data-emergency-contact]");
+    if (emergencyContactButton) {
+      openEmergencyContactDialog(emergencyContactButton.dataset.emergencyContact);
+      return;
+    }
+    if (event.target.closest("[data-close-emergency-contact]")) {
+      closeEmergencyContactDialog();
+      return;
+    }
+
     const mobileAvailabilityStep = event.target.closest("[data-mobile-availability-step]");
     if (mobileAvailabilityStep && state.team.length) {
       const currentIndex = Math.max(0, state.team.findIndex((employee) => String(employee.id) === String(state.availabilityMobileEmployeeId)));
@@ -3071,6 +3620,26 @@
         renderScheduleModule();
       }
       navigate(navButton.dataset.nav);
+      if (state.role === "manager" && navButton.dataset.nav === "reports" && !state.reportData && !state.reportLoading) loadInventoryReport();
+    }
+
+    const reportPreset = event.target.closest("[data-report-preset]");
+    if (reportPreset && state.role === "manager") {
+      setReportPreset(reportPreset.dataset.reportPreset);
+      return;
+    }
+
+    if (event.target.closest("[data-download-report]")) {
+      downloadInventoryReport();
+      return;
+    }
+
+    if (event.target.closest("[data-open-half-gallon-refill]")) {
+      state.inventoryEntryMode = "usage_half_gallon";
+      renderInventory();
+      navigate("inventory");
+      window.setTimeout(() => document.querySelector("#inventoryEntryForm")?.scrollIntoView({ behavior: "smooth", block: "start" }), 80);
+      return;
     }
 
     const teamViewButton = event.target.closest("[data-team-view]");
@@ -3359,6 +3928,20 @@
   });
 
   document.addEventListener("submit", (event) => {
+    if (event.target.id === "reportRangeForm") {
+      event.preventDefault();
+      const formData = new FormData(event.target);
+      state.reportStart = String(formData.get("reportStart") || "");
+      state.reportEnd = String(formData.get("reportEnd") || "");
+      state.reportData = null;
+      loadInventoryReport();
+      return;
+    }
+    if (event.target.id === "emergencyContactForm") {
+      event.preventDefault();
+      saveEmergencyContact(event.target);
+      return;
+    }
     if (event.target.id === "requestForm") {
       event.preventDefault();
       saveRequest(event.target);

@@ -51,6 +51,9 @@
     const employees = team.map((employee) => ({
       ...employee,
       skills: [...employee.skills],
+      minShifts: Math.max(0, Math.min(6, Number(employee.minShifts) || 0)),
+      maxShifts: Math.max(1, Math.min(6, Number(employee.maxShifts) || 6)),
+      weekdayRequirement: Math.max(0, Math.min(4, Number(employee.weekdayRequirement) || 0)),
       credits: 0,
       estimatedHours: 0,
       dayCount: {},
@@ -74,7 +77,9 @@
 
     function canAddWorkDay(employee, day) {
       if (employee.daysWorked.has(day)) return true;
-      if (employee.daysWorked.size >= employee.maxDays) return false;
+      const businessDayCap = Number.isFinite(employee.businessDayCap) ? employee.businessDayCap : days.length;
+      const managerDayCap = Number.isFinite(employee.maxShifts) ? employee.maxShifts : days.length;
+      if (employee.daysWorked.size >= Math.min(businessDayCap, managerDayCap)) return false;
       if ((day === "Saturday" || day === "Sunday") && Number.isFinite(employee.maxWeekendDays)) {
         const weekendDaysWorked = ["Saturday", "Sunday"].filter((weekendDay) => employee.daysWorked.has(weekendDay)).length;
         if (weekendDaysWorked >= employee.maxWeekendDays) return false;
@@ -92,18 +97,38 @@
     function chooseBalanced(candidates, day, shift) {
       const shuffled = [...candidates].sort(() => random() - 0.5);
       shuffled.sort((a, b) => {
-        const aBelow = Math.max(0, a.minDays - a.daysWorked.size);
-        const bBelow = Math.max(0, b.minDays - b.daysWorked.size);
-        if (aBelow !== bBelow) return bBelow - aBelow;
         const aPreferred = preference(a, day, shift) === "preferred" ? 1 : 0;
         const bPreferred = preference(b, day, shift) === "preferred" ? 1 : 0;
         if (aPreferred !== bPreferred) return bPreferred - aPreferred;
         const aAvoidsDay = a.avoidDays?.includes(day) ? 1 : 0;
         const bAvoidsDay = b.avoidDays?.includes(day) ? 1 : 0;
         if (aAvoidsDay !== bAvoidsDay) return aAvoidsDay - bAvoidsDay;
+        const aBelowMinimum = a.daysWorked.size < a.minShifts ? 1 : 0;
+        const bBelowMinimum = b.daysWorked.size < b.minShifts ? 1 : 0;
+        if (aBelowMinimum !== bBelowMinimum) return bBelowMinimum - aBelowMinimum;
+        const aPriority = Number.isFinite(a.schedulePriority) ? a.schedulePriority : Number.MAX_SAFE_INTEGER;
+        const bPriority = Number.isFinite(b.schedulePriority) ? b.schedulePriority : Number.MAX_SAFE_INTEGER;
+        if (aPriority !== bPriority) return aPriority - bPriority;
         return a.daysWorked.size - b.daysWorked.size || a.credits - b.credits;
       });
       return shuffled[0] || null;
+    }
+
+    function assignedIc(employee, day) {
+      return schedule[day].IC.find((assignment) => assignment.employeeId === employee.id) || null;
+    }
+
+    function markIcSplitDuty(employee, day, floorShift, reason = "coverage") {
+      const icAssignment = assignedIc(employee, day);
+      if (!icAssignment || icAssignment.floorShift) return false;
+      icAssignment.floorShift = floorShift;
+      icAssignment.productionShift = floorShift === "AM" ? "PM" : "AM";
+      icAssignment.requiresApproval = true;
+      const floorName = floorShift === "AM" ? "morning" : "night";
+      const productionName = icAssignment.productionShift === "AM" ? "morning" : "night";
+      const reasonCopy = reason === "training" ? "so training can happen" : "to protect floor coverage";
+      addWarning("ic-split-duty", `${day}: ${employee.name} makes IC in the ${productionName} and works the ${floorName} shift ${reasonCopy}. Last-resort manager approval required.`, "approval");
+      return true;
     }
 
     function chooseRegular(day, shift, requireKey) {
@@ -119,21 +144,29 @@
       );
 
       const fresh = candidates.filter((employee) => !employee.daysWorked.has(day));
-      if (fresh.length) return { employee: chooseBalanced(fresh, day, shift), isDouble: false };
+      if (fresh.length) return { employee: chooseBalanced(fresh, day, shift), isDouble: false, isIcSplit: false };
 
       candidates = candidates.filter((employee) => employee.willingDouble?.includes(day));
-      if (!candidates.length) return { employee: null, isDouble: false };
-      return { employee: chooseBalanced(candidates, day, shift), isDouble: true };
+      if (candidates.length) return { employee: chooseBalanced(candidates, day, shift), isDouble: true, isIcSplit: false };
+
+      const icFallback = employees.filter((employee) => {
+        const icAssignment = assignedIc(employee, day);
+        return icAssignment && !icAssignment.floorShift && canWork(employee, day, shift) &&
+          !alreadyInShift.has(employee.id) && (!requireKey || hasSkill(employee, "key_holder"));
+      });
+      if (!icFallback.length) return { employee: null, isDouble: false, isIcSplit: false };
+      return { employee: chooseBalanced(icFallback, day, shift), isDouble: false, isIcSplit: true };
     }
 
-    function assignRegular(employee, day, shift, isDouble) {
-      const assignment = { employeeId: employee.id, name: employee.name, isDouble, requiresApproval: isDouble };
+    function assignRegular(employee, day, shift, isDouble, isIcSplit = false) {
+      const assignment = { employeeId: employee.id, name: employee.name, isDouble, isIcSplit, requiresApproval: isDouble || isIcSplit };
       schedule[day][shift].push(assignment);
-      addCredits(employee, day, 1, shift === "AM" ? 6 : 5);
+      if (!isIcSplit) addCredits(employee, day, 1, shift === "AM" ? 6 : 5);
       if (isDouble) {
         schedule[day].pendingDoubles.push(employee.name);
         addWarning("double", `${day}: ${employee.name} is suggested for a double and needs manager approval.`, "approval");
       }
+      if (isIcSplit) markIcSplitDuty(employee, day, shift, "coverage");
     }
 
     const trainee = settings.trainingEnabled ? byId.get(settings.traineeId) : null;
@@ -143,9 +176,9 @@
     const isICTraining = settings.trainingEnabled && settings.trainingSkill === "ic_production";
     const eligibleICTrainingDays = trainee ? dayNames.filter((day) =>
       canWork(trainee, day, "AM") && canWork(trainee, day, "PM") &&
-      trainee.maxDays >= 1 && employees.some((employee) =>
+      employees.some((employee) =>
         employee.id !== trainee.id && hasSkill(employee, "ic_maker") && hasSkill(employee, "trainer") &&
-        canWork(employee, day, "AM") && canWork(employee, day, "PM") && employee.maxDays >= 1
+        canWork(employee, day, "AM") && canWork(employee, day, "PM")
       )
     ) : [];
     let scheduledTarget = target;
@@ -190,7 +223,7 @@
         addWarning("ic", `${day}: no IC maker is available for a flexible full-day production assignment.`, "critical");
         continue;
       }
-      schedule[day].IC.push({ employeeId: chosen.id, name: chosen.name, shiftCredits: 2 });
+      schedule[day].IC.push({ employeeId: chosen.id, name: chosen.name, shiftCredits: 2, productionShift: "FULL", floorShift: null, requiresApproval: false });
       specialByDay[day].add(chosen.id);
       addCredits(chosen, day, 2, 11);
     }
@@ -238,12 +271,21 @@
           }
         }
       } else {
-        const requestedTarget = Math.min(trainee.maxDays, Math.max(1, trainee.minDays));
-        const storeTrainerCandidates = (day, shift) => employees.filter((employee) =>
+        const requestedTarget = Math.max(1, Math.min(days.length, Number(trainee.maxShifts) || days.length));
+        const regularStoreTrainerCandidates = (day, shift) => employees.filter((employee) =>
           hasSkill(employee, "trainer") && employee.id !== trainee.id &&
           canWork(employee, day, shift) && canAddWorkDay(employee, day) &&
           !specialByDay[day].has(employee.id)
         );
+        const storeTrainerCandidates = (day, shift) => {
+          const regular = regularStoreTrainerCandidates(day, shift);
+          if (regular.length) return regular;
+          return employees.filter((employee) => {
+            const icAssignment = assignedIc(employee, day);
+            return hasSkill(employee, "trainer") && employee.id !== trainee.id &&
+              canWork(employee, day, shift) && icAssignment && !icAssignment.floorShift;
+          });
+        };
         const slots = days.flatMap((day) => ["AM", "PM"].map((shift) => ({ day: day.name, shift })))
           .filter(({ day, shift }) => canWork(trainee, day, shift))
           .sort((a, b) => {
@@ -262,14 +304,16 @@
           const bestRank = Math.min(...trainers.map(storeTrainerRank), 99);
           const trainer = chooseBalanced(trainers.filter((employee) => storeTrainerRank(employee) === bestRank), day, shift);
           if (!trainer) continue;
+          const trainerUsesIcSplitDuty = Boolean(assignedIc(trainer, day));
+          if (trainerUsesIcSplitDuty) markIcSplitDuty(trainer, day, shift, "training");
           schedule[day].training.push(
             { employeeId: trainee.id, name: `${trainee.name} (trainee)`, role: "trainee", shift, shiftCredits: 1 },
-            { employeeId: trainer.id, name: `${trainer.name} (trainer)`, role: "trainer", shift, shiftCredits: 1 }
+            { employeeId: trainer.id, name: `${trainer.name} (trainer)`, role: "trainer", shift, shiftCredits: 1, isIcSplit: trainerUsesIcSplitDuty }
           );
           specialByDay[day].add(trainee.id);
           specialByDay[day].add(trainer.id);
           addCredits(trainee, day, 1, shift === "AM" ? 6 : 5);
-          addCredits(trainer, day, 1, shift === "AM" ? 6 : 5);
+          if (!trainerUsesIcSplitDuty) addCredits(trainer, day, 1, shift === "AM" ? 6 : 5);
           trainingCredits += 1;
         }
         trainingReady = trainingCredits >= requestedTarget;
@@ -288,7 +332,7 @@
         const shiftName = shift === "AM" ? "morning" : "night";
 
         const keyPick = chooseRegular(day, shift, true);
-        if (keyPick.employee) assignRegular(keyPick.employee, day, shift, keyPick.isDouble);
+        if (keyPick.employee) assignRegular(keyPick.employee, day, shift, keyPick.isDouble, keyPick.isIcSplit);
         else addWarning("key", `${day} ${shiftName}: no key holder is available.`, "critical");
 
         while (schedule[day][shift].length < targetNeed) {
@@ -297,7 +341,7 @@
             addWarning("coverage", `${day} ${shiftName}: regular staffing is short ${targetNeed - schedule[day][shift].length} position(s).`, "critical");
             break;
           }
-          assignRegular(pick.employee, day, shift, pick.isDouble);
+          assignRegular(pick.employee, day, shift, pick.isDouble, pick.isIcSplit);
         }
       }
     }
@@ -306,8 +350,22 @@
       if (employee.submitted === false) {
         addWarning("request", `${employee.name} has not submitted this week's request.`, "info");
       }
-      if (employee.daysWorked.size < employee.minDays) {
-        addWarning("minimum", `${employee.name} received ${employee.daysWorked.size} of ${employee.minDays} requested working days.`, "warning");
+      if (employee.weekendRequired) {
+        const weekendAvailable = ["Saturday", "Sunday"].some((day) =>
+          canWork(employee, day, "AM") || canWork(employee, day, "PM")
+        );
+        if (!weekendAvailable) {
+          addWarning("weekend", `${employee.name} is in the weekend-required priority group but did not offer Saturday or Sunday.`, "critical");
+        }
+      }
+      const weekdaysOffered = ["Tuesday", "Wednesday", "Thursday", "Friday"].filter((day) =>
+        canWork(employee, day, "AM") || canWork(employee, day, "PM")
+      ).length;
+      if (weekdaysOffered < employee.weekdayRequirement) {
+        addWarning("weekday", `${employee.name} must offer ${employee.weekdayRequirement} weekday${employee.weekdayRequirement === 1 ? "" : "s"}, but offered ${weekdaysOffered}.`, "critical");
+      }
+      if (employee.daysWorked.size < employee.minShifts) {
+        addWarning("minimum", `${employee.name} is scheduled ${employee.daysWorked.size} day${employee.daysWorked.size === 1 ? "" : "s"}, below the manager minimum of ${employee.minShifts}.`, "warning");
       }
       if (employee.estimatedHours > 40) {
         addWarning("overtime", `${employee.name} is estimated at ${employee.estimatedHours.toFixed(1)} hours and needs overtime review.`, "approval");

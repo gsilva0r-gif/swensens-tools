@@ -18,7 +18,7 @@
     <link rel="icon" href="./favicon.svg" />
     <link rel="apple-touch-icon" sizes="180x180" href="./apple-touch-icon.png" />
     <link rel="manifest" href="./manifest.webmanifest" />
-    <link rel="stylesheet" href="./styles.css?v=reports-v1" />
+    <link rel="stylesheet" href="./styles.css?v=messages-inbox-v3" />
   </head>
   <body>
     <div class="stripe" aria-hidden="true"></div>
@@ -75,6 +75,7 @@
         <aside class="side-nav" aria-label="Primary navigation">
           <button class="nav-item active manager-only-nav" data-nav="home"><span>⌂</span>Home</button>
           <button class="nav-item" data-nav="schedule"><span>▦</span>Schedule</button>
+          <button class="nav-item" data-nav="messages"><span>◉</span>Messages</button>
           <button class="nav-item" data-nav="inventory"><span>◫</span>Inventory</button>
           <button class="nav-item manager-only-nav" data-nav="reports"><span>▥</span>Reports</button>
         </aside>
@@ -135,16 +136,39 @@
               <div class="panel-heading">
                 <div>
                   <p class="eyebrow">Gabriel only</p>
-                  <h3>Database check</h3>
+                  <h3>IT tools</h3>
                 </div>
                 <span class="system-check-icon" aria-hidden="true">DB</span>
               </div>
-              <div class="system-check-content">
-                <div>
-                  <p>Checks five database areas without changing any records.</p>
-                  <p id="databaseHealthMessage" class="system-check-message" role="status">No system check has been run on this device.</p>
+              <div class="it-tools-content">
+                <div class="system-check-content">
+                  <div>
+                    <p>Runs a real read-and-write check across the Hub and saves the latest result in Supabase.</p>
+                    <p id="databaseHealthMessage" class="system-check-message" data-system-check-message role="status">No saved system check yet.</p>
+                    <div id="databaseHealthAreas" class="system-check-areas" data-system-check-areas aria-label="System check results"></div>
+                  </div>
+                  <button id="runDatabaseHealthCheck" class="primary-button compact" type="button" data-run-database-health-check>Run real health check</button>
                 </div>
-                <button id="runDatabaseHealthCheck" class="primary-button compact" type="button">Run system check</button>
+                <details class="recovery-guide">
+                  <summary>Supabase pause recovery</summary>
+                  <ol>
+                    <li>Open the Swensen’s project in the Supabase dashboard.</li>
+                    <li>Choose Restore or Resume and wait for the project to report healthy.</li>
+                    <li>Return here and run the real health check.</li>
+                    <li>Test one manager save and one employee login before normal scheduling resumes.</li>
+                  </ol>
+                  <p>Do not make ghost schedules or fake inventory. This health check creates one legitimate system-status write.</p>
+                </details>
+                <details class="recovery-guide">
+                  <summary>Deployment checklist</summary>
+                  <ol>
+                    <li>Run the complete automated test suite.</li>
+                    <li>Apply the newest timestamped Supabase migration before the matching app update.</li>
+                    <li>Deploy any changed Supabase function, then publish the app and run this real health check.</li>
+                    <li>Test one manager save, one employee login, Schedule Records, and Inventory Records.</li>
+                  </ol>
+                  <p>Only Gabriel sees these IT controls. Managers continue to see the business tools they need.</p>
+                </details>
               </div>
             </section>
 
@@ -168,12 +192,14 @@
 
           <section id="page-schedule" class="page">
             <div id="scheduleManagerHeading" class="page-title-row">
-              <div><p class="eyebrow">Weekly tools</p><h2>Schedule</h2><p>Availability, requests, and schedule options.</p></div>
+              <div><p class="eyebrow">Weekly tools</p><h2>Schedule</h2><p>Availability, scheduling priority, requests, and schedule options.</p></div>
               <button id="generateButtonTop" class="primary-button compact">Generate options</button>
             </div>
             <div class="schedule-module-tabs" role="tablist" aria-label="Schedule tools">
               <button class="schedule-module-tab active" type="button" role="tab" data-schedule-view="availability">Availability</button>
+              <button class="schedule-module-tab" type="button" role="tab" data-schedule-view="priority">Priority</button>
               <button class="schedule-module-tab" type="button" role="tab" data-schedule-view="builder">Build</button>
+              <button class="schedule-module-tab" type="button" role="tab" data-schedule-view="records">Records</button>
             </div>
             <section id="scheduleBuilderModule" class="schedule-module-panel" hidden>
               <div id="scheduleSettings" class="settings-grid"></div>
@@ -191,10 +217,25 @@
                 <div class="schedule-requests-drawer-body"><div id="scheduleRequestContent"></div></div>
               </details>
             </section>
+            <section id="schedulePriorityModule" class="schedule-module-panel" hidden>
+              <div class="schedule-module-heading"><div><h3>Scheduling priority</h3><p>Set who receives preference first when qualified employees want the same shift.</p></div></div>
+              <div id="schedulingPriorityContent"></div>
+            </section>
+            <section id="scheduleRecordsModule" class="schedule-module-panel" hidden>
+              <div id="scheduleRecordsContent"></div>
+            </section>
             <section id="employeeScheduleWorkspace" hidden>
               <div class="page-title-row"><div><p id="requestPageEyebrow" class="eyebrow">Employee portal</p><h2 id="requestPageTitle">My schedule & request</h2><p id="requestPageCopy">See your assigned shifts and update your weekly availability.</p></div></div>
               <div id="employeeRequestContent"></div>
             </section>
+          </section>
+
+          <section id="page-messages" class="page">
+            <div class="page-title-row messages-page-heading">
+              <div><p class="eyebrow">Staff communication</p><h2>Messages</h2><p>Tap any active coworker to open or start a direct conversation.</p></div>
+              <button class="primary-button compact" type="button" data-new-chat>New group</button>
+            </div>
+            <div id="messagesContent" aria-live="polite"></div>
           </section>
 
           <section id="page-inventory" class="page">
@@ -212,6 +253,7 @@
       <nav class="bottom-nav" aria-label="Mobile navigation">
         <button class="nav-item active manager-only-nav" data-nav="home"><span>⌂</span>Home</button>
         <button class="nav-item" data-nav="schedule"><span>▦</span>Schedule</button>
+        <button class="nav-item" data-nav="messages"><span>◉</span>Messages</button>
         <button class="nav-item" data-nav="inventory"><span>◫</span>Inventory</button>
         <button class="nav-item manager-only-nav" data-nav="reports"><span>▥</span>Reports</button>
       </nav>
@@ -238,8 +280,8 @@
     <div id="printScheduleRoot" aria-hidden="true"></div>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="./config.js"></script>
-    <script src="./data.js"></script>
-    <script src="./scheduler.js"></script>
-    <script src="./app.js?v=reports-v1"></script>
+    <script src="./data.js?v=messages-inbox-v3"></script>
+    <script src="./scheduler.js?v=messages-inbox-v3"></script>
+    <script src="./app.js?v=messages-inbox-v3"></script>
   </body>
 </html>

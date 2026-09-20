@@ -28,6 +28,10 @@
     availabilityMatrix: document.querySelector("#availabilityMatrix"),
     scheduleBuilderModule: document.querySelector("#scheduleBuilderModule"),
     scheduleAvailabilityModule: document.querySelector("#scheduleAvailabilityModule"),
+    schedulePriorityModule: document.querySelector("#schedulePriorityModule"),
+    schedulingPriorityContent: document.querySelector("#schedulingPriorityContent"),
+    scheduleRecordsModule: document.querySelector("#scheduleRecordsModule"),
+    scheduleRecordsContent: document.querySelector("#scheduleRecordsContent"),
     scheduleRequestsModule: document.querySelector("#scheduleRequestsModule"),
     scheduleManagerHeading: document.querySelector("#scheduleManagerHeading"),
     scheduleModuleTabs: document.querySelector(".schedule-module-tabs"),
@@ -36,9 +40,11 @@
     showEmployeeAccountForm: document.querySelector("#showEmployeeAccountForm"),
     databaseHealthPanel: document.querySelector("#databaseHealthPanel"),
     databaseHealthMessage: document.querySelector("#databaseHealthMessage"),
+    databaseHealthAreas: document.querySelector("#databaseHealthAreas"),
     runDatabaseHealthCheck: document.querySelector("#runDatabaseHealthCheck"),
     inventory: document.querySelector("#inventoryContent"),
     reports: document.querySelector("#reportsContent"),
+    messages: document.querySelector("#messagesContent"),
     emergencyContactDialog: document.querySelector("#emergencyContactDialog"),
     emergencyContactForm: document.querySelector("#emergencyContactForm"),
     emergencyContactTitle: document.querySelector("#emergencyContactTitle"),
@@ -52,6 +58,7 @@
     profile: null,
     role: "manager",
     team: clone(demoData.team),
+    staffDirectory: clone(demoData.team).map(({ id, code, name, phone }) => ({ id, code, name, phone })),
     hiddenTeam: [],
     settings: clone(demoData.defaultSettings),
     options: [],
@@ -59,12 +66,45 @@
     savedScheduleIds: {},
     publishedOption: null,
     publishedSchedule: null,
+    publishedSchedules: [],
     employeeAssignments: [],
+    employeeScheduleWeekStart: "",
+    scheduleHistory: [],
+    selectedScheduleRecordId: "",
+    employeePortalView: "schedule",
+    dateRequests: [],
+    dateRequestSetupMissing: false,
+    requestCalendarWeekStart: "",
+    requestDraftWeekStart: "",
+    requestDraftDates: {},
+    activeRequestDate: "",
+    dateRequestKind: "time_off",
+    dateRequestNotes: "",
+    dateRequestBusy: false,
+    shiftChangeRequests: [],
+    shiftChangeOffers: [],
+    shiftChangeSetupMissing: false,
+    shiftChangeAssignmentId: "",
+    shiftChangeType: "cover",
+    shiftChangeBusy: false,
+    chatThreads: [],
+    chatMessages: [],
+    activeChatThreadId: "",
+    newChatOpen: false,
+    messagesSetupMissing: false,
+    messageBusy: false,
+    directChatOpeningId: "",
+    mobileMessagesThreadOpen: false,
+    chatRefreshDebounce: null,
     editingEmployeeId: null,
     editingSkillsEmployeeId: null,
     showingEmployeeAccountForm: false,
     teamView: "active",
     scheduleModuleView: "availability",
+    priorityEditing: false,
+    priorityPolicySnapshot: null,
+    priorityDragCode: "",
+    schedulingPolicyBusy: false,
     availabilityMobileEmployeeId: "",
     requestsExpanded: false,
     accountActionBusy: false,
@@ -72,6 +112,7 @@
     requestSyncChannel: null,
     requestRefreshTimer: null,
     requestRefreshDebounce: null,
+    shiftChangeRefreshDebounce: null,
     profileSkills: [],
     canAccessInventory: false,
     inventoryFlavors: [],
@@ -108,9 +149,13 @@
     reportLoading: false,
     reportError: "",
     systemCheckBusy: false,
+    latestSystemCheck: null,
+    isItPreview: false,
     emergencyContacts: {},
     emergencyContactEmployeeId: "",
   };
+
+  let priorityPointerDrag = null;
 
   const seniorityCodes = [
     "PAUL01",
@@ -136,6 +181,168 @@
       return aRank - bRank || a.name.localeCompare(b.name);
     });
   }
+
+  function syncSchedulingPolicy() {
+    const current = Array.isArray(state.settings.priorityOrder) ? state.settings.priorityOrder : [];
+    const activeCodes = new Set(state.team.map((employee) => employee.code));
+    const orderedCodes = current.filter((code) => activeCodes.has(code));
+    state.team.forEach((employee) => {
+      if (!orderedCodes.includes(employee.code)) orderedCodes.push(employee.code);
+    });
+    state.settings.priorityOrder = orderedCodes;
+    const rankByCode = new Map(orderedCodes.map((code, index) => [code, index + 1]));
+    state.team.forEach((employee) => {
+      employee.schedulePriority = rankByCode.get(employee.code) || Number(employee.schedulePriority) || state.team.length;
+      employee.minShifts = Math.max(0, Math.min(6, Number(employee.minShifts) || 0));
+      employee.maxShifts = Math.max(employee.minShifts, Math.min(6, Number(employee.maxShifts) || 6));
+      employee.weekdayRequirement = Math.max(0, Math.min(4, Number(employee.weekdayRequirement) || 0));
+      if (typeof employee.weekendRequired !== "boolean") {
+        employee.weekendRequired = employee.schedulePriority >= (Number(state.settings.weekendPriorityStart) || 9);
+      }
+    });
+  }
+
+  function priorityOrderedTeam() {
+    syncSchedulingPolicy();
+    return [...state.team].sort((a, b) => a.schedulePriority - b.schedulePriority || a.name.localeCompare(b.name));
+  }
+
+  function employeeOffersWeekend(employee) {
+    return ["Saturday", "Sunday"].some((day) =>
+      (employee.availability?.[day]?.AM || "available") !== "unavailable" ||
+      (employee.availability?.[day]?.PM || "available") !== "unavailable"
+    );
+  }
+
+  function employeeOfferedWeekdays(employee) {
+    return ["Tuesday", "Wednesday", "Thursday", "Friday"].filter((day) =>
+      (employee.availability?.[day]?.AM || "available") !== "unavailable" ||
+      (employee.availability?.[day]?.PM || "available") !== "unavailable"
+    ).length;
+  }
+
+  function requestDeadlineForWeek(weekStart) {
+    const deadline = new Date(`${weekStart}T23:59:59`);
+    deadline.setDate(deadline.getDate() - 12);
+    return deadline;
+  }
+
+  function requestDeadlineLabel(weekStart) {
+    return new Intl.DateTimeFormat("en-US", { weekday: "long", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })
+      .format(requestDeadlineForWeek(weekStart));
+  }
+
+  function localIsoDate(value) {
+    const date = value instanceof Date ? new Date(value) : new Date(`${value}T12:00:00`);
+    if (Number.isNaN(date.getTime())) return "";
+    const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
+    return local.toISOString().slice(0, 10);
+  }
+
+  function addDaysToIso(value, amount) {
+    const date = new Date(`${value}T12:00:00`);
+    date.setDate(date.getDate() + amount);
+    return localIsoDate(date);
+  }
+
+  function currentScheduleTuesday(value = new Date()) {
+    const date = value instanceof Date ? new Date(value) : new Date(`${value}T12:00:00`);
+    date.setHours(12, 0, 0, 0);
+    if (date.getDay() === 1) {
+      date.setDate(date.getDate() + 1);
+    } else {
+      date.setDate(date.getDate() - ((date.getDay() - 2 + 7) % 7));
+    }
+    return localIsoDate(date);
+  }
+
+  function publishedScheduleChoices() {
+    const current = currentScheduleTuesday();
+    const requiredWeeks = [current, addDaysToIso(current, 7)];
+    const byWeek = new Map(state.publishedSchedules.map((schedule) => [schedule.week_start, schedule]));
+    const weeks = [...new Set([
+      ...requiredWeeks,
+      ...state.publishedSchedules.map((schedule) => schedule.week_start).filter((weekStart) => weekStart >= current),
+    ])].sort();
+    return weeks.map((weekStart) => ({ weekStart, schedule: byWeek.get(weekStart) || null }));
+  }
+
+  function selectedEmployeeScheduleWeek() {
+    const choices = publishedScheduleChoices();
+    if (!state.employeeScheduleWeekStart || !choices.some((choice) => choice.weekStart === state.employeeScheduleWeekStart)) {
+      state.employeeScheduleWeekStart = choices.find((choice) => choice.weekStart === currentScheduleTuesday())?.weekStart
+        || choices.find((choice) => choice.schedule)?.weekStart
+        || choices[0]?.weekStart
+        || currentScheduleTuesday();
+    }
+    return choices.find((choice) => choice.weekStart === state.employeeScheduleWeekStart)
+      || { weekStart: state.employeeScheduleWeekStart, schedule: null };
+  }
+
+  function selectedEmployeeSchedule() {
+    return selectedEmployeeScheduleWeek().schedule;
+  }
+
+  function managerPublishedScheduleWeeks() {
+    const current = currentScheduleTuesday();
+    return [...new Set([
+      current,
+      addDaysToIso(current, 7),
+      state.settings.weekStart,
+      ...state.scheduleHistory
+        .filter((schedule) => schedule.status === "published" && schedule.week_start >= current)
+        .map((schedule) => schedule.week_start),
+    ].filter(Boolean))].sort();
+  }
+
+  function upcomingRequestWeeks(count = 6) {
+    const configured = new Date(`${state.settings.weekStart}T12:00:00`);
+    const today = new Date();
+    today.setHours(12, 0, 0, 0);
+    const todayTuesday = new Date(today);
+    todayTuesday.setDate(todayTuesday.getDate() - ((todayTuesday.getDay() - 2 + 7) % 7));
+    const first = configured.getTime() >= todayTuesday.getTime() ? configured : todayTuesday;
+    return Array.from({ length: count }, (_, index) => {
+      const date = new Date(first);
+      date.setDate(date.getDate() + index * 7);
+      return localIsoDate(date);
+    });
+  }
+
+  function requestScopeLabel(scope) {
+    return scope === "AM" ? "Morning shift only" : scope === "PM" ? "Night shift only" : "All day";
+  }
+
+  function dateRequestEmployee(request) {
+    return state.team.find((employee) => String(employee.id) === String(request.employee_id));
+  }
+
+  function dateRequestIsLate(request) {
+    if (request?.is_late === true) return true;
+    if (!request?.submitted_at || !request?.schedule_week_start) return false;
+    return new Date(request.submitted_at).getTime() > requestDeadlineForWeek(request.schedule_week_start).getTime();
+  }
+
+  function publishedScheduleForWeek(weekStart) {
+    const visible = state.publishedSchedules.find((schedule) => schedule.week_start === weekStart && schedule.status === "published");
+    if (visible) return visible;
+    if (state.mode === "demo") return null;
+    if (state.publishedSchedule?.week_start === weekStart) return state.publishedSchedule;
+    return state.scheduleHistory.find((schedule) => schedule.week_start === weekStart && schedule.status === "published") || null;
+  }
+
+  function isRequestLate(employee) {
+    if (!employee?.submitted) return false;
+    if (employee.lateRequest === true) return true;
+    if (!employee.submittedAt) return false;
+    return new Date(employee.submittedAt).getTime() > requestDeadlineForWeek(state.settings.weekStart).getTime();
+  }
+
+  const requestTypeLabels = {
+    weekly_availability: "Weekly availability",
+    time_off: "Time off",
+    call_off: "Call-off notice",
+  };
 
   const inventoryCategoryLabels = {
     vanillas: "Vanillas",
@@ -247,13 +454,20 @@
       || null;
   }
 
-  const demoStorageKey = "swensens-demo-requests-v2";
+  const demoStorageKey = "swensens-demo-requests-v3";
+  const demoDateRequestsStorageKey = "swensens-demo-date-requests-v1";
+  const demoShiftChangeStorageKey = "swensens-demo-shift-changes-v2";
+  const demoMessagesStorageKey = "swensens-demo-messages-v1";
   const emergencyContactsStorageKey = "swensens-emergency-contacts-device-v1";
 
   function loadDemoTeam() {
     try {
       const saved = JSON.parse(window.sessionStorage.getItem(demoStorageKey));
-      if (saved?.weekStart === demoData.defaultSettings.weekStart && Array.isArray(saved.team)) return saved.team;
+      if (saved?.weekStart === demoData.defaultSettings.weekStart && Array.isArray(saved.team)) {
+        if (Array.isArray(saved.priorityOrder)) state.settings.priorityOrder = saved.priorityOrder;
+        if (Number(saved.weekendPriorityStart)) state.settings.weekendPriorityStart = Number(saved.weekendPriorityStart);
+        return saved.team;
+      }
     } catch (_) {
       // A blocked or malformed browser store should never prevent the demo from opening.
     }
@@ -265,9 +479,133 @@
       window.sessionStorage.setItem(demoStorageKey, JSON.stringify({
         weekStart: state.settings.weekStart,
         team: state.team,
+        priorityOrder: state.settings.priorityOrder,
+        weekendPriorityStart: state.settings.weekendPriorityStart,
       }));
     } catch (_) {
       // Demo persistence is a convenience; real accounts save through Supabase.
+    }
+  }
+
+  function demoShiftChangeSeed() {
+    const weekStart = currentScheduleTuesday();
+    return [{
+      id: "preview-emergency-calloff",
+      schedule_week_start: weekStart,
+      assignment_id: demoAssignmentId("demo-ryan", "Friday", "PM", weekStart),
+      employee_id: "demo-ryan",
+      request_type: "call_off",
+      target_assignment_id: null,
+      status: "pending",
+      urgent: true,
+      note: "Family emergency—please help cover tonight.",
+      work_day: 5,
+      assignment_type: "PM",
+      submitted_at: "2026-10-02T17:15:00.000Z",
+      shift_cover_offers: [],
+    }];
+  }
+
+  function loadDemoShiftChanges() {
+    try {
+      const saved = JSON.parse(window.sessionStorage.getItem(demoShiftChangeStorageKey));
+      if (Array.isArray(saved)) return saved;
+    } catch (_) {
+      // The preview still works when browser storage is blocked.
+    }
+    return demoShiftChangeSeed();
+  }
+
+  function saveDemoShiftChanges() {
+    try {
+      window.sessionStorage.setItem(demoShiftChangeStorageKey, JSON.stringify(state.shiftChangeRequests));
+    } catch (_) {
+      // Demo persistence is optional; live requests save through Supabase.
+    }
+  }
+
+  function demoChatSeed() {
+    const now = Date.now();
+    const teamMembers = state.team.map((employee) => employee.id);
+    if (state.profile?.id && !teamMembers.includes(state.profile.id)) teamMembers.push(state.profile.id);
+    const partner = state.team.find((employee) => String(employee.id) !== String(state.profile?.id)) || state.team[0];
+    return {
+      threads: [
+        {
+          id: "preview-team-chat",
+          title: "Whole Team",
+          thread_type: "team",
+          member_ids: teamMembers,
+          created_at: new Date(now - 86400000).toISOString(),
+          updated_at: new Date(now - 18 * 60000).toISOString(),
+        },
+        ...(partner ? [{
+          id: "preview-direct-chat",
+          title: partner.name,
+          thread_type: "direct",
+          member_ids: [state.profile?.id, partner.id].filter(Boolean),
+          created_at: new Date(now - 7200000).toISOString(),
+          updated_at: new Date(now - 7200000).toISOString(),
+        }] : []),
+      ],
+      messages: [
+        { id: "preview-message-1", thread_id: "preview-team-chat", sender_id: "demo-gabriel", body: "The new schedule is posted. Please check this week and next week.", created_at: new Date(now - 3600000).toISOString() },
+        { id: "preview-message-2", thread_id: "preview-team-chat", sender_id: "demo-cherie", body: "Got it—thank you!", created_at: new Date(now - 18 * 60000).toISOString() },
+        ...(partner ? [{ id: "preview-message-3", thread_id: "preview-direct-chat", sender_id: partner.id, body: "Can you check the schedule when you have a minute?", created_at: new Date(now - 7200000).toISOString() }] : []),
+      ],
+    };
+  }
+
+  function loadDemoMessages() {
+    try {
+      const saved = JSON.parse(window.sessionStorage.getItem(demoMessagesStorageKey));
+      if (Array.isArray(saved?.threads) && Array.isArray(saved?.messages)) return saved;
+    } catch (_) {
+      // Messages still open with preview content when browser storage is unavailable.
+    }
+    return demoChatSeed();
+  }
+
+  function saveDemoMessages() {
+    try {
+      window.sessionStorage.setItem(demoMessagesStorageKey, JSON.stringify({ threads: state.chatThreads, messages: state.chatMessages }));
+    } catch (_) {
+      // Preview persistence is optional; live messages save through Supabase.
+    }
+  }
+
+  function demoDateRequestSeed() {
+    const weekStart = state.settings.weekStart;
+    return [{
+      id: "preview-late-date-request",
+      employee_id: "demo-ryan",
+      request_date: addDaysToIso(weekStart, 3),
+      schedule_week_start: weekStart,
+      shift_scope: "ALL_DAY",
+      request_kind: "time_off",
+      notes: "Appointment that came up after the Thursday cutoff.",
+      status: "submitted",
+      is_late: true,
+      schedule_was_published: false,
+      submitted_at: new Date(requestDeadlineForWeek(weekStart).getTime() + 86400000).toISOString(),
+    }];
+  }
+
+  function loadDemoDateRequests() {
+    try {
+      const saved = JSON.parse(window.sessionStorage.getItem(demoDateRequestsStorageKey));
+      if (Array.isArray(saved)) return saved;
+    } catch (_) {
+      // The preview remains usable when browser storage is unavailable.
+    }
+    return demoDateRequestSeed();
+  }
+
+  function saveDemoDateRequests() {
+    try {
+      window.sessionStorage.setItem(demoDateRequestsStorageKey, JSON.stringify(state.dateRequests));
+    } catch (_) {
+      // Demo persistence is a convenience; real requests save through Supabase.
     }
   }
 
@@ -377,9 +715,9 @@
   }
 
   function systemCheckTimestampLabel(value) {
-    if (!value) return "No system check has been run on this device.";
+    if (!value) return "No saved system check yet.";
     const date = new Date(value);
-    if (Number.isNaN(date.getTime())) return "No system check has been run on this device.";
+    if (Number.isNaN(date.getTime())) return "No saved system check yet.";
     return `Last successful check: ${new Intl.DateTimeFormat("en-US", {
       month: "short",
       day: "numeric",
@@ -388,35 +726,84 @@
     }).format(date)}`;
   }
 
+  function renderSystemCheckStatus(check = state.latestSystemCheck) {
+    const messageTargets = document.querySelectorAll("[data-system-check-message]");
+    const areaTargets = document.querySelectorAll("[data-system-check-areas]");
+    const setMessage = (message) => messageTargets.forEach((target) => { target.textContent = message; });
+    const setAreas = (markup) => areaTargets.forEach((target) => { target.innerHTML = markup; });
+    if (!check) {
+      setMessage("No saved system check yet.");
+      setAreas("");
+      return;
+    }
+    if (check.setup_error) {
+      setMessage("Health-check setup is pending. Apply the newest Supabase migration, then run this check again.");
+      setAreas("");
+      return;
+    }
+    const labels = {
+      employees: "Employees",
+      requests: "Requests",
+      schedules: "Schedules",
+      inventory: "Inventory",
+      master_sheets: "Master sheets",
+      database_write: "Database write",
+    };
+    const checks = check.checks || {};
+    setMessage(`${systemCheckTimestampLabel(check.checked_at)} · ${check.preview ? "Preview only" : "Read and write verified"}.`);
+    setAreas(Object.entries(labels).map(([key, label]) => {
+      const result = checks[key] || {};
+      const count = Number.isFinite(Number(result.records)) ? ` · ${Number(result.records)} records` : "";
+      const assignments = Number.isFinite(Number(result.assignments)) ? ` · ${Number(result.assignments)} assignments` : "";
+      return `<span class="system-check-area ${result.ok ? "healthy" : "failed"}"><b>${result.ok ? "✓" : "!"}</b>${escapeHtml(label)}${count}${assignments}</span>`;
+    }).join(""));
+  }
+
+  async function loadLatestSystemHealthCheck(profile = state.profile) {
+    if (!supabaseClient || !isGabrielAccount(profile)) return;
+    const { data, error } = await supabaseClient.rpc("get_latest_system_health_check");
+    state.latestSystemCheck = error ? { setup_error: true } : data || null;
+  }
+
   async function runDatabaseHealthCheck() {
-    if (state.mode !== "supabase" || !supabaseClient || !isGabrielAccount() || state.systemCheckBusy) return;
+    if (!isGabrielAccount() || state.systemCheckBusy) return;
     state.systemCheckBusy = true;
-    elements.runDatabaseHealthCheck.disabled = true;
-    elements.runDatabaseHealthCheck.textContent = "Checking…";
-    elements.databaseHealthMessage.textContent = "Contacting each part of the database…";
+    const buttons = document.querySelectorAll("[data-run-database-health-check]");
+    buttons.forEach((button) => { button.disabled = true; button.textContent = "Checking…"; });
+    document.querySelectorAll("[data-system-check-message]").forEach((target) => {
+      target.textContent = "Checking records and verifying a real database write…";
+    });
 
-    const checks = await Promise.all([
-      supabaseClient.from("employees").select("id").limit(1),
-      supabaseClient.from("weekly_requests").select("id").limit(1),
-      supabaseClient.from("week_settings").select("week_start").limit(1),
-      supabaseClient.from("ice_cream_inventory").select("flavor_id").limit(1),
-      supabaseClient.from("ice_cream_production_sheets").select("id").limit(1),
-    ]);
-    const failed = checks.find((result) => result.error);
-
-    if (failed) {
-      elements.databaseHealthMessage.textContent = `System check failed: ${failed.error.message}. If the project is paused, resume it in Supabase first.`;
-      showToast("Database system check failed.");
-    } else {
-      const checkedAt = new Date().toISOString();
-      try { window.localStorage.setItem("swensens-last-system-check", checkedAt); } catch (_) {}
-      elements.databaseHealthMessage.textContent = `${systemCheckTimestampLabel(checkedAt)} · 5 database areas responded.`;
-      showToast("Database is active and responding.");
+    if (state.isItPreview) {
+      state.latestSystemCheck = {
+        status: "healthy",
+        checked_at: new Date().toISOString(),
+        write_verified: true,
+        preview: true,
+        checks: Object.fromEntries(["employees", "requests", "schedules", "inventory", "master_sheets", "database_write"].map((key) => [key, { ok: true }])),
+      };
+      renderSystemCheckStatus();
+      showToast("IT health-check preview completed. No live database was changed.");
+    } else if (state.mode === "supabase" && supabaseClient) {
+      const { data, error } = await supabaseClient.rpc("run_system_health_check", { p_app_version: "reliability-v1" });
+      if (error) {
+        const setupMissing = /run_system_health_check|schema cache|function/i.test(error.message || "");
+        document.querySelectorAll("[data-system-check-message]").forEach((target) => {
+          target.textContent = setupMissing
+            ? "Health-check setup is missing. Apply the newest Supabase migration first."
+            : `Health check failed: ${error.message}. If the project is paused, resume it in Supabase first.`;
+        });
+        document.querySelectorAll("[data-system-check-areas]").forEach((target) => { target.innerHTML = ""; });
+        showToast("Database health check failed.");
+      } else {
+        state.latestSystemCheck = data;
+        renderSystemCheckStatus();
+        showToast("Database reads and write are healthy.");
+      }
     }
 
     state.systemCheckBusy = false;
-    elements.runDatabaseHealthCheck.disabled = false;
-    elements.runDatabaseHealthCheck.textContent = "Run system check";
+    buttons.forEach((button) => { button.disabled = false; button.textContent = "Run real health check"; });
   }
 
   function scheduleWeekRows(weekStart) {
@@ -439,23 +826,31 @@
     return `${formatter.format(rows[0].date)}–${formatter.format(rows.at(-1).date)}`;
   }
 
+  function demoAssignmentId(employeeId, dayName, assignmentType, weekStart = state.employeeScheduleWeekStart || state.settings.weekStart) {
+    return `preview-assignment:${weekStart}:${dayName}:${employeeId}:${assignmentType}`;
+  }
+
   function scheduleCellParts(option, dayName, employeeId) {
     const record = option.schedule[dayName];
     if (!record) return [];
     const parts = [];
     const morning = record.AM.find((item) => item.employeeId === employeeId);
     const night = record.PM.find((item) => item.employeeId === employeeId);
-    if (morning) parts.push({ text: `11:30${morning.requiresApproval ? "*" : ""}`, type: "morning", hours: 6 });
-    if (night) parts.push({ text: `5:30${night.requiresApproval ? "*" : ""}`, type: "night", hours: 5 });
-    if (record.IC.some((item) => item.employeeId === employeeId)) parts.push({ text: "IC", type: "ic", hours: 11, fullDay: true });
-    record.training.filter((item) => item.employeeId === employeeId).forEach((item) => {
-      const role = item.role === "trainee" ? "Training" : "Trainer";
+    if (morning) parts.push({ text: `11:30${morning.requiresApproval ? "*" : ""}`, type: "morning", hours: 6, assignmentId: demoAssignmentId(employeeId, dayName, "AM") });
+    if (night) parts.push({ text: `5:30${night.requiresApproval ? "*" : ""}`, type: "night", hours: 5, assignmentId: demoAssignmentId(employeeId, dayName, "PM") });
+    const icAssignment = record.IC.find((item) => item.employeeId === employeeId);
+    if (icAssignment) {
+      const productionLabel = icAssignment.productionShift === "AM" ? "11:30 IC" : icAssignment.productionShift === "PM" ? "5:30 IC" : "IC";
+      parts.push({ text: `${productionLabel}${icAssignment.requiresApproval ? "*" : ""}`, type: "ic", hours: 11, fullDay: true, productionShift: icAssignment.productionShift || "FULL", assignmentId: demoAssignmentId(employeeId, dayName, "IC") });
+    }
+    record.training.filter((item) => item.employeeId === employeeId && item.role === "trainee" && Number(item.shiftCredits) > 0).forEach((item) => {
       const time = item.shift === "AM" ? "11:30" : item.shift === "PM" ? "5:30" : "IC";
       parts.push({
-        text: `${time} ${role}`,
-        type: item.role === "trainee" ? "trainee" : "trainer",
+        text: time,
+        type: item.shift === "AM" ? "morning" : item.shift === "PM" ? "night" : "ic",
         hours: item.shift === "AM" ? 6 : item.shift === "PM" ? 5 : 11,
         fullDay: item.shift === "FULL",
+        assignmentId: demoAssignmentId(employeeId, dayName, "TRAINING"),
       });
     });
     return parts;
@@ -465,16 +860,14 @@
     const approval = part.text.includes("*") ? "*" : "";
     if (part.type === "morning") return { time: `11:30${approval}`, note: "" };
     if (part.type === "night") return { time: `5:30${approval}`, note: "" };
-    if (part.type === "ic") return { time: "IC", note: "" };
-
-    const time = part.text.startsWith("11:30") ? "11:30" : part.text.startsWith("5:30") ? "5:30" : "IC";
-    return { time, note: part.type === "trainee" ? "train" : "coach" };
+    if (part.type === "ic") return { time: part.text.replace("*", ""), note: part.text.includes("*") ? "approval" : "" };
+    return { time: part.text.replace("*", ""), note: part.text.includes("*") ? "approval" : "" };
   }
 
-  function buildMobileScheduleSheet(option, dateFormatter) {
-    const workingDays = scheduleWeekRows(state.settings.weekStart).filter((day) => !day.closed);
+  function buildMobileScheduleSheet(option, dateFormatter, weekStart = state.settings.weekStart, roster = state.team) {
+    const workingDays = scheduleWeekRows(weekStart).filter((day) => !day.closed);
     const dayHeaders = workingDays.map((day) => `<th scope="col"><strong>${escapeHtml(day.name.slice(0, 3))}</strong><small>${dateFormatter.format(day.date)}</small></th>`).join("");
-    const employeeRows = state.team.map((employee) => {
+    const employeeRows = roster.map((employee) => {
       const cells = workingDays.map((day) => {
         const parts = scheduleCellParts(option, day.name, employee.id);
         if (!parts.length) return `<td><span class="mobile-schedule-off" aria-label="Off">—</span></td>`;
@@ -488,19 +881,18 @@
     }).join("");
 
     return `<div class="mobile-schedule-sheet-wrap">
-      <div class="mobile-schedule-title"><strong>Full week</strong><span>${scheduleWeekLabel(state.settings.weekStart)}</span></div>
+      <div class="mobile-schedule-title"><strong>Full week</strong><span>${scheduleWeekLabel(weekStart)}</span></div>
       <table class="mobile-schedule-sheet">
         <thead><tr><th scope="col">Team</th>${dayHeaders}</tr></thead>
         <tbody><tr class="mobile-schedule-closed"><th scope="row">Monday</th><td colspan="${workingDays.length}">CLOSED</td></tr>${employeeRows}</tbody>
       </table>
-      <div class="mobile-schedule-legend"><span><b>11:30</b> morning</span><span><b>5:30</b> night</span><span><b>IC</b> production</span><span><b>train</b> trainee</span><span><b>coach</b> trainer</span><span><b>*</b> approval</span></div>
+      <div class="mobile-schedule-legend"><span><b>11:30</b> morning</span><span><b>5:30</b> night</span><span><b>IC</b> production</span><span><b>*</b> approval</span></div>
     </div>`;
   }
 
-  function buildScheduleSheet(option) {
+  function buildScheduleSheet(option, weekStart = state.settings.weekStart, roster = state.team) {
     const dateFormatter = new Intl.DateTimeFormat("en-US", { month: "numeric", day: "numeric" });
-    const roster = state.team;
-    const rows = scheduleWeekRows(state.settings.weekStart).map((day) => {
+    const rows = scheduleWeekRows(weekStart).map((day) => {
       const dayHeading = `<strong>${day.name}</strong><small>${dateFormatter.format(day.date)}</small>`;
       if (day.closed) return `<tr class="closed-row"><th>${dayHeading}</th><td colspan="${roster.length}">CLOSED</td></tr>`;
       const cells = roster.map((employee) => {
@@ -511,13 +903,13 @@
     }).join("");
     return `<div class="desktop-schedule-sheet"><div class="schedule-sheet-wrap">
         <table class="schedule-sheet">
-          <caption>Swensen's Weekly Schedule · ${scheduleWeekLabel(state.settings.weekStart)}</caption>
+          <caption>Swensen's Weekly Schedule · ${scheduleWeekLabel(weekStart)}</caption>
           <thead><tr><th class="day-column">Day</th>${roster.map((employee) => `<th title="${escapeHtml(employee.name)}">${escapeHtml(employee.name)}</th>`).join("")}</tr></thead>
           <tbody>${rows}</tbody>
         </table>
       </div>
-      <div class="schedule-legend"><span><b>11:30</b> Morning</span><span><b>5:30</b> Night</span><span><b>IC</b> Flexible full day</span><span><b>Training</b> Additional</span><span><b>*</b> Approval needed</span><span><b>×</b> Off</span></div>
-    </div>${buildMobileScheduleSheet(option, dateFormatter)}`;
+      <div class="schedule-legend"><span><b>11:30</b> Morning</span><span><b>5:30</b> Night</span><span><b>IC</b> Production</span><span><b>*</b> Approval needed</span><span><b>×</b> Off</span></div>
+    </div>${buildMobileScheduleSheet(option, dateFormatter, weekStart, roster)}`;
   }
 
   function csvCell(value) {
@@ -525,16 +917,13 @@
     return /[",\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
   }
 
-  function downloadSchedule(optionIndex) {
-    const option = state.options[optionIndex];
-    if (!option) return;
+  function downloadScheduleFile(option, weekStart, roster, filename) {
     const dateFormatter = new Intl.DateTimeFormat("en-US", { month: "numeric", day: "numeric", year: "numeric" });
-    const roster = state.team;
     const rows = [
-      ["Swensen's Weekly Schedule", scheduleWeekLabel(state.settings.weekStart)],
+      ["Swensen's Weekly Schedule", scheduleWeekLabel(weekStart)],
       [],
       ["Day", "Date", ...roster.map((employee) => employee.name)],
-      ...scheduleWeekRows(state.settings.weekStart).map((day) => [
+      ...scheduleWeekRows(weekStart).map((day) => [
         day.name,
         dateFormatter.format(day.date),
         ...roster.map((employee, employeeIndex) => day.closed
@@ -546,12 +935,23 @@
     const blobUrl = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
     const link = document.createElement("a");
     link.href = blobUrl;
-    link.download = `swensens-schedule-${state.settings.weekStart}-option-${optionIndex + 1}.csv`;
+    link.download = filename;
     document.body.append(link);
     link.click();
     link.remove();
     URL.revokeObjectURL(blobUrl);
     showToast("Schedule CSV downloaded");
+  }
+
+  function downloadSchedule(optionIndex) {
+    const option = state.options[optionIndex];
+    if (!option) return;
+    downloadScheduleFile(
+      option,
+      state.settings.weekStart,
+      state.team,
+      `swensens-schedule-${state.settings.weekStart}-option-${optionIndex + 1}.csv`,
+    );
   }
 
   function printSchedule(optionIndex) {
@@ -562,6 +962,88 @@
     document.body.classList.add("printing-schedule");
     window.addEventListener("afterprint", () => document.body.classList.remove("printing-schedule"), { once: true });
     window.requestAnimationFrame(() => window.print());
+  }
+
+  function scheduleRecordRoster(record) {
+    const knownEmployees = new Map([...state.team, ...state.hiddenTeam].map((employee) => [String(employee.id), employee]));
+    const snapshot = Array.isArray(record.roster_snapshot) ? record.roster_snapshot : [];
+    if (snapshot.length) {
+      return snapshot.map((employee) => ({
+        id: employee.id,
+        code: employee.code || employee.employee_code || "",
+        name: employee.name || employee.display_name || knownEmployees.get(String(employee.id))?.name || "Archived employee",
+      }));
+    }
+    const employeeIds = [...new Set((record.assignments || []).map((assignment) => String(assignment.employee_id)))];
+    return employeeIds.map((employeeId) => knownEmployees.get(employeeId) || {
+      id: employeeId,
+      code: "ARCHIVED",
+      name: "Archived employee",
+    });
+  }
+
+  function scheduleRecordOption(record) {
+    const schedule = Object.fromEntries(demoData.days.map((day) => [day.name, { AM: [], PM: [], IC: [], training: [] }]));
+    (record.assignments || []).forEach((assignment) => {
+      if (assignment.coverage_status === "open") return;
+      const day = demoData.days.find((item) => item.number === Number(assignment.work_day));
+      if (!day || !schedule[day.name]) return;
+      const base = {
+        employeeId: assignment.employee_id,
+        isDouble: Boolean(assignment.is_double),
+        requiresApproval: Boolean(assignment.requires_approval && !assignment.approved),
+      };
+      if (assignment.assignment_type === "AM" || assignment.assignment_type === "PM") {
+        schedule[day.name][assignment.assignment_type].push(base);
+      } else if (assignment.assignment_type === "IC") {
+        const productionShift = String(assignment.notes || "").match(/production:(AM|PM)/)?.[1] || "FULL";
+        const floorShift = String(assignment.notes || "").match(/floor:(AM|PM)/)?.[1] || null;
+        schedule[day.name].IC.push({ ...base, productionShift, floorShift, requiresApproval: Boolean(assignment.requires_approval && !assignment.approved) });
+      } else if (assignment.assignment_type === "TRAINING") {
+        const [role = "training", shift = "FULL"] = String(assignment.notes || "training:FULL").split(":");
+        schedule[day.name].training.push({
+          ...base,
+          role,
+          shift,
+          shiftCredits: Number(assignment.shift_credits) || 1,
+        });
+      }
+    });
+    return {
+      schedule,
+      score: Number(record.score) || 0,
+      warnings: Array.isArray(record.warnings) ? record.warnings : [],
+    };
+  }
+
+  function findScheduleRecord(recordId) {
+    return state.scheduleHistory.find((record) => String(record.id) === String(recordId));
+  }
+
+  function printScheduleRecord(recordId) {
+    const record = findScheduleRecord(recordId);
+    if (!record) return;
+    const option = scheduleRecordOption(record);
+    const roster = scheduleRecordRoster(record);
+    const printRoot = document.querySelector("#printScheduleRoot");
+    printRoot.innerHTML = `<section class="print-document"><header><p>Swensen's Ice Cream · San Francisco</p><h1>Weekly Staff Schedule</h1><span>${scheduleWeekLabel(record.week_start)} · ${record.status === "published" ? "Published" : "Archived record"}</span></header>${buildScheduleSheet(option, record.week_start, roster)}</section>`;
+    document.body.classList.add("printing-schedule");
+    window.addEventListener("afterprint", () => {
+      document.body.classList.remove("printing-schedule");
+      printRoot.innerHTML = "";
+    }, { once: true });
+    window.requestAnimationFrame(() => window.print());
+  }
+
+  function downloadScheduleRecord(recordId) {
+    const record = findScheduleRecord(recordId);
+    if (!record) return;
+    downloadScheduleFile(
+      scheduleRecordOption(record),
+      record.week_start,
+      scheduleRecordRoster(record),
+      `swensens-schedule-${record.week_start}-${record.status}.csv`,
+    );
   }
 
   function buildProductionPrintTable(sheet) {
@@ -634,6 +1116,11 @@
     elements.appView.hidden = false;
     elements.appView.classList.toggle("employee-mode", state.role !== "manager");
     elements.appView.classList.toggle("inventory-staff-mode", state.role !== "manager" && state.canAccessInventory);
+    if (state.mode === "demo" && !state.chatThreads.length) {
+      const demoMessages = loadDemoMessages();
+      state.chatThreads = demoMessages.threads;
+      state.chatMessages = demoMessages.messages;
+    }
     document.querySelectorAll(".nav-item[data-nav]").forEach((button) => {
       const page = button.dataset.nav;
       button.hidden = state.role === "manager"
@@ -643,12 +1130,9 @@
     document.querySelector("#displayName").textContent = profile.display_name || "Manager";
     document.querySelector("#roleBadge").textContent = state.role === "manager" ? "Manager" : state.canAccessInventory ? "IC Maker" : "Employee";
     elements.logoutButton.textContent = (profile.display_name || "Manager").slice(0, 2).toUpperCase();
-    elements.databaseHealthPanel.hidden = state.mode !== "supabase" || !isGabrielAccount(profile);
-    if (!elements.databaseHealthPanel.hidden) {
-      let lastCheck = "";
-      try { lastCheck = window.localStorage.getItem("swensens-last-system-check") || ""; } catch (_) {}
-      elements.databaseHealthMessage.textContent = systemCheckTimestampLabel(lastCheck);
-    }
+    elements.databaseHealthPanel.hidden = state.role !== "manager" || !isGabrielAccount(profile) || (state.mode !== "supabase" && !state.isItPreview);
+    if (!elements.databaseHealthPanel.hidden) renderSystemCheckStatus();
+    syncSchedulingPolicy();
     renderAll();
     navigate(state.role === "manager" ? "home" : "schedule");
   }
@@ -662,13 +1146,46 @@
     state.savedScheduleIds = {};
     state.publishedOption = null;
     state.publishedSchedule = null;
+    state.publishedSchedules = [];
     state.employeeAssignments = [];
+    state.employeeScheduleWeekStart = "";
+    state.scheduleHistory = [];
+    state.selectedScheduleRecordId = "";
+    state.employeePortalView = "schedule";
+    state.dateRequests = [];
+    state.dateRequestSetupMissing = false;
+    state.requestCalendarWeekStart = "";
+    state.requestDraftWeekStart = "";
+    state.requestDraftDates = {};
+    state.activeRequestDate = "";
+    state.dateRequestKind = "time_off";
+    state.dateRequestNotes = "";
+    state.dateRequestBusy = false;
+    state.shiftChangeRequests = [];
+    state.shiftChangeOffers = [];
+    state.shiftChangeSetupMissing = false;
+    state.shiftChangeAssignmentId = "";
+    state.shiftChangeType = "cover";
+    state.shiftChangeBusy = false;
+    state.chatThreads = [];
+    state.chatMessages = [];
+    state.activeChatThreadId = "";
+    state.newChatOpen = false;
+    state.messagesSetupMissing = false;
+    state.messageBusy = false;
+    state.directChatOpeningId = "";
+    state.mobileMessagesThreadOpen = false;
     state.editingEmployeeId = null;
     state.editingSkillsEmployeeId = null;
     state.hiddenTeam = [];
+    state.staffDirectory = [];
     state.showingEmployeeAccountForm = false;
     state.teamView = "active";
     state.scheduleModuleView = "availability";
+    state.priorityEditing = false;
+    state.priorityPolicySnapshot = null;
+    state.priorityDragCode = "";
+    state.schedulingPolicyBusy = false;
     state.availabilityMobileEmployeeId = "";
     state.requestsExpanded = false;
     state.accountActionBusy = false;
@@ -709,6 +1226,8 @@
     state.reportLoading = false;
     state.reportError = "";
     state.systemCheckBusy = false;
+    state.latestSystemCheck = null;
+    state.isItPreview = false;
     elements.databaseHealthPanel.hidden = true;
     elements.appView.classList.remove("employee-mode");
     elements.appView.classList.remove("inventory-staff-mode");
@@ -728,7 +1247,7 @@
       renderRequests();
       renderScheduleModule();
     }
-    if (state.role !== "manager" && pageName !== "schedule" && !(state.canAccessInventory && pageName === "inventory")) pageName = "schedule";
+    if (state.role !== "manager" && !["schedule", "messages"].includes(pageName) && !(state.canAccessInventory && pageName === "inventory")) pageName = "schedule";
     document.querySelectorAll(".page").forEach((page) => page.classList.remove("active-page"));
     document.querySelector(`#page-${pageName}`)?.classList.add("active-page");
     document.querySelectorAll("[data-nav]").forEach((button) => {
@@ -745,9 +1264,11 @@
   }
 
   function renderAll() {
+    syncSchedulingPolicy();
     if (state.role !== "manager") {
       renderRequests();
       renderScheduleModule();
+      renderMessages();
       if (state.canAccessInventory) renderInventory();
       return;
     }
@@ -760,28 +1281,143 @@
     renderScheduleResults();
     renderInventory();
     renderReports();
+    renderMessages();
   }
 
   function renderDashboard() {
     const submitted = state.team.filter((employee) => employee.submitted).length;
-    document.querySelector("#requestMetric").textContent = `${submitted} of ${state.team.length}`;
+    const lateDateRequests = state.dateRequests.filter((request) => request.schedule_week_start === state.settings.weekStart && dateRequestIsLate(request)).length;
+    const late = state.team.filter(isRequestLate).length + lateDateRequests;
+    const urgentShiftChanges = state.shiftChangeRequests.filter((request) => request.urgent && !["approved", "declined", "cancelled"].includes(request.status)).length;
+    const attentionCount = late + urgentShiftChanges;
+    document.querySelector("#requestMetric").textContent = urgentShiftChanges ? `${urgentShiftChanges} urgent` : late ? `${late} late` : `${submitted} of ${state.team.length}`;
+    const requestStatusPill = document.querySelector(".status-card.mint .status-pill");
+    if (requestStatusPill) {
+      requestStatusPill.textContent = attentionCount ? "Needs review" : "On track";
+      requestStatusPill.classList.toggle("good", !attentionCount);
+      requestStatusPill.classList.toggle("warn", Boolean(attentionCount));
+    }
+    const requestAttention = document.querySelector('[data-schedule-view="requests"]');
+    if (requestAttention) {
+      requestAttention.querySelector("strong").textContent = urgentShiftChanges ? `Review ${urgentShiftChanges} urgent shift alert${urgentShiftChanges === 1 ? "" : "s"}` : late ? `Review ${late} late request${late === 1 ? "" : "s"}` : "Review employee requests";
+      requestAttention.querySelector("small").textContent = urgentShiftChanges ? "Call-off or coverage needs attention" : late ? "Submitted after the Thursday cutoff" : `${submitted} of ${state.team.length} submitted`;
+    }
     document.querySelector("#icMetric").textContent = `${state.settings.icTarget} days`;
     const trainee = state.team.find((employee) => employee.id === state.settings.traineeId);
     document.querySelector("#trainingMetric").textContent = state.settings.trainingEnabled && trainee ? trainee.name : "None";
   }
 
+  function applyDateRequestsToTeam(weekStart) {
+    state.dateRequests.filter((request) => request.schedule_week_start === weekStart).forEach((request) => {
+      const employee = dateRequestEmployee(request);
+      if (!employee) return;
+      const date = new Date(`${request.request_date}T12:00:00`);
+      const day = demoData.days.find((item) => item.number === date.getDay());
+      if (!day || !employee.availability?.[day.name]) return;
+      if (request.shift_scope === "ALL_DAY" || request.shift_scope === "AM") employee.availability[day.name].AM = "unavailable";
+      if (request.shift_scope === "ALL_DAY" || request.shift_scope === "PM") employee.availability[day.name].PM = "unavailable";
+      if (employee.availability[day.name].AM === "unavailable" || employee.availability[day.name].PM === "unavailable") {
+        employee.willingDouble = employee.willingDouble.filter((value) => value !== day.name);
+      }
+    });
+  }
+
+  async function loadDateRequestsForPortal({ role = state.role, weekStart = state.settings.weekStart, announce = false } = {}) {
+    if (state.mode !== "supabase" || !supabaseClient) return;
+    let query = supabaseClient.from("date_requests")
+      .select("id, employee_id, request_date, schedule_week_start, shift_scope, request_kind, notes, status, is_late, schedule_was_published, submitted_at")
+      .order("request_date");
+    if (role === "manager") {
+      query = query.eq("schedule_week_start", weekStart);
+    } else {
+      const firstWeek = upcomingRequestWeeks()[0];
+      query = query.gte("request_date", firstWeek).lte("request_date", addDaysToIso(firstWeek, 48));
+    }
+    const previousIds = new Set(state.dateRequests.map((request) => request.id));
+    const { data, error } = await query;
+    if (error) {
+      state.dateRequestSetupMissing = /date_requests|schema cache|relation/i.test(error.message || "");
+      state.dateRequests = [];
+      return;
+    }
+    state.dateRequestSetupMissing = false;
+    state.dateRequests = data || [];
+    if (role === "manager") applyDateRequestsToTeam(weekStart);
+    const newLate = state.dateRequests.filter((request) => dateRequestIsLate(request) && !previousIds.has(request.id));
+    if (announce && newLate.length) {
+      const employee = dateRequestEmployee(newLate[0]);
+      showToast(`Late request received${employee ? ` from ${employee.name}` : ""}.`);
+    }
+  }
+
+  async function loadShiftChangeRequests({ announce = false, role = state.role } = {}) {
+    if (state.mode === "demo") {
+      state.shiftChangeRequests = loadDemoShiftChanges();
+      state.shiftChangeSetupMissing = false;
+      return;
+    }
+    if (state.mode !== "supabase" || !supabaseClient) return;
+    const previousIds = new Set(state.shiftChangeRequests.map((request) => request.id));
+    let query = supabaseClient.from("shift_change_requests")
+      .select("*, shift_cover_offers(id, employee_id, note, offered_at)")
+      .order("submitted_at", { ascending: false });
+    if (role === "manager") {
+      query = query.in("schedule_week_start", managerPublishedScheduleWeeks());
+    } else {
+      const visibleWeeks = [...new Set(state.publishedSchedules.map((schedule) => schedule.week_start))];
+      query = visibleWeeks.length
+        ? query.in("schedule_week_start", visibleWeeks)
+        : query.eq("schedule_week_start", currentScheduleTuesday());
+    }
+    const { data, error } = await query;
+    if (error) {
+      state.shiftChangeSetupMissing = /shift_change_requests|shift_cover_offers|schema cache|relation/i.test(error.message || "");
+      state.shiftChangeRequests = [];
+      return;
+    }
+    state.shiftChangeSetupMissing = false;
+    state.shiftChangeRequests = data || [];
+    const urgent = state.shiftChangeRequests.find((request) => request.urgent && !previousIds.has(request.id));
+    if (announce && role === "manager" && urgent) {
+      const employee = state.team.find((item) => String(item.id) === String(urgent.employee_id));
+      showToast(`Urgent call-off${employee ? ` from ${employee.name}` : ""}.`);
+    }
+  }
+
+  async function reloadPublishedAssignments() {
+    if (state.mode !== "supabase" || !supabaseClient || state.role === "manager") return;
+    const scheduleIds = state.publishedSchedules.map((schedule) => schedule.id);
+    if (!scheduleIds.length) {
+      state.employeeAssignments = [];
+      return;
+    }
+    const { data, error } = await supabaseClient.from("schedule_assignments")
+      .select("id, schedule_id, employee_id, work_day, assignment_type, shift_credits, is_double, requires_approval, approved, coverage_status, notes")
+      .in("schedule_id", scheduleIds);
+    if (!error) state.employeeAssignments = data || [];
+  }
+
   async function refreshWeeklyRequests() {
     if (state.mode !== "supabase" || state.role !== "manager") return;
+    state.team.forEach((employee) => {
+      employee.availability = clone(employee.baseAvailability || employee.availability || demoData.availability());
+      employee.willingDouble = clone(employee.baseWillingDouble || []);
+      employee.submitted = false;
+      employee.submittedAt = null;
+      employee.lateRequest = false;
+      employee.requestType = "weekly_availability";
+    });
     const { data: requestRows, error } = await supabaseClient.from("weekly_requests")
       .select("*, availability_slots(*)").eq("week_start", state.settings.weekStart);
     if (error) return;
     (requestRows || []).forEach((request) => {
       const employee = state.team.find((item) => item.id === request.employee_id);
       if (!employee) return;
-      employee.minDays = request.min_shifts;
-      employee.maxDays = request.max_shifts;
       employee.notes = request.notes;
       employee.submitted = true;
+      employee.submittedAt = request.submitted_at;
+      employee.lateRequest = new Date(request.submitted_at).getTime() > requestDeadlineForWeek(request.week_start).getTime();
+      employee.requestType = employee.requestType || "weekly_availability";
       employee.willingDouble = [];
       (request.availability_slots || []).forEach((slot) => {
         const day = demoData.days.find((item) => item.number === slot.work_day);
@@ -790,6 +1426,8 @@
         if (slot.willing_double && !employee.willingDouble.includes(day.name)) employee.willingDouble.push(day.name);
       });
     });
+    await loadDateRequestsForPortal({ role: "manager", weekStart: state.settings.weekStart, announce: true });
+    await loadShiftChangeRequests({ announce: true });
     renderDashboard();
     renderAvailabilityMatrix();
     if (!state.editingEmployeeId) renderRequests();
@@ -801,21 +1439,59 @@
     state.requestRefreshDebounce = window.setTimeout(refreshWeeklyRequests, 550);
   }
 
+  function queueShiftChangeRefresh() {
+    window.clearTimeout(state.shiftChangeRefreshDebounce);
+    state.shiftChangeRefreshDebounce = window.setTimeout(async () => {
+      await loadShiftChangeRequests({ announce: true });
+      if (state.role === "manager") {
+        await loadScheduleHistory();
+        renderDashboard();
+        if (!state.editingEmployeeId) renderRequests();
+      } else {
+        await reloadPublishedAssignments();
+        renderEmployeePortal();
+      }
+    }, 350);
+  }
+
+  function queueChatRefresh() {
+    window.clearTimeout(state.chatRefreshDebounce);
+    state.chatRefreshDebounce = window.setTimeout(async () => {
+      await loadChatData();
+      renderMessages();
+    }, 250);
+  }
+
   function startRequestSync() {
     stopRequestSync();
-    if (state.mode !== "supabase" || state.role !== "manager") return;
-    state.requestSyncChannel = supabaseClient.channel("swensens-weekly-request-sync")
-      .on("postgres_changes", { event: "*", schema: "public", table: "weekly_requests" }, queueRequestRefresh)
-      .on("postgres_changes", { event: "*", schema: "public", table: "availability_slots" }, queueRequestRefresh)
+    if (state.mode !== "supabase") return;
+    let channel = supabaseClient.channel("swensens-weekly-request-sync");
+    if (state.role === "manager") {
+      channel = channel
+        .on("postgres_changes", { event: "*", schema: "public", table: "weekly_requests" }, queueRequestRefresh)
+        .on("postgres_changes", { event: "*", schema: "public", table: "availability_slots" }, queueRequestRefresh)
+        .on("postgres_changes", { event: "*", schema: "public", table: "date_requests" }, queueRequestRefresh);
+      state.requestRefreshTimer = window.setInterval(refreshWeeklyRequests, 30000);
+    }
+    state.requestSyncChannel = channel
+      .on("postgres_changes", { event: "*", schema: "public", table: "shift_change_requests" }, queueShiftChangeRefresh)
+      .on("postgres_changes", { event: "*", schema: "public", table: "shift_cover_offers" }, queueShiftChangeRefresh)
+      .on("postgres_changes", { event: "*", schema: "public", table: "schedule_assignments" }, queueShiftChangeRefresh)
+      .on("postgres_changes", { event: "*", schema: "public", table: "chat_threads" }, queueChatRefresh)
+      .on("postgres_changes", { event: "*", schema: "public", table: "chat_members" }, queueChatRefresh)
+      .on("postgres_changes", { event: "*", schema: "public", table: "chat_messages" }, queueChatRefresh)
       .subscribe();
-    state.requestRefreshTimer = window.setInterval(refreshWeeklyRequests, 30000);
   }
 
   function stopRequestSync() {
     window.clearInterval(state.requestRefreshTimer);
     window.clearTimeout(state.requestRefreshDebounce);
+    window.clearTimeout(state.shiftChangeRefreshDebounce);
+    window.clearTimeout(state.chatRefreshDebounce);
     state.requestRefreshTimer = null;
     state.requestRefreshDebounce = null;
+    state.shiftChangeRefreshDebounce = null;
+    state.chatRefreshDebounce = null;
     if (state.requestSyncChannel && supabaseClient) supabaseClient.removeChannel(state.requestSyncChannel);
     state.requestSyncChannel = null;
   }
@@ -2459,7 +3135,7 @@
         <div class="form-grid"><label class="field-label">Week begins<input id="weekStartInput" type="date" value="${state.settings.weekStart}"></label></div>
       </article>
       <article class="setting-card ic-settings">
-        <h3>IC production target</h3><p>IC work is additional, flexible full-day work and counts as one working day.</p>
+        <h3>IC production target</h3><p>IC work is normally a flexible full day. If coverage or training cannot work otherwise, the scheduler may suggest IC in one shift and floor work in the other as an approval-only last resort.</p>
         <div class="segmented" id="icTargetButtons">${[2, 3, 4].map((number) => `<button data-ic-target="${number}" class="${state.settings.icTarget === number ? "active" : ""}">${number}</button>`).join("")}</div>
         <p class="ic-gap-note">Normal rule: leave at least one full day between IC production days.</p>
         <div class="switch-row ${state.settings.icTarget === 4 ? "" : "muted-fields"}"><span><strong class="switch-title">Emergency back-to-back IC</strong><small>Four IC days cannot fit Tuesday–Sunday with the normal gap. Manager approval is required.</small></span><label class="switch"><input id="allowConsecutiveICInput" type="checkbox" ${state.settings.allowConsecutiveIC ? "checked" : ""} ${state.settings.icTarget === 4 ? "" : "disabled"}><span></span></label></div>
@@ -2469,13 +3145,13 @@
         <div class="switch-row"><span class="field-label">Approval required</span><label class="switch"><input type="checkbox" checked disabled><span></span></label></div>
       </article>
       <article class="setting-card training-settings">
-        <h3>Training week</h3><p>The scheduler automatically finds shifts where the trainee and a qualified trainer are both available.</p>
+        <h3>Training week</h3><p>The scheduler automatically uses as many available training days as the trainee’s manager-set maximum allows.</p>
         <div class="switch-row"><span class="field-label">Include training</span><label class="switch"><input id="trainingEnabledInput" type="checkbox" ${state.settings.trainingEnabled ? "checked" : ""}><span></span></label></div>
         <div class="form-grid ${state.settings.trainingEnabled ? "" : "muted-fields"}">
           <label class="field-label">Trainee<select id="traineeInput" ${state.settings.trainingEnabled ? "" : "disabled"}>${trainees}</select></label>
           <label class="field-label">Skill<select id="trainingSkillInput" ${state.settings.trainingEnabled ? "" : "disabled"}><option value="ic_production" ${state.settings.trainingSkill === "ic_production" ? "selected" : ""}>IC production</option><option value="store_operations" ${state.settings.trainingSkill === "store_operations" ? "selected" : ""}>Store operations</option></select></label>
         </div>
-        <div class="auto-rule-note"><strong>No forced training day</strong><span>The trainee is never placed alone. Their availability and requested minimum/maximum working days still apply.</span></div>
+        <div class="auto-rule-note"><strong>No forced training day</strong><span>The trainee is never placed alone. Availability, qualifications, and business coverage rules still apply.</span></div>
         ${state.settings.trainingSkill === "store_operations" ? `<div class="auto-rule-note trainer-priority-note"><strong>Store-operations trainer priority</strong><span>Israel first, then Gabriel, then Evelyn or Dania—always subject to availability.</span></div>` : ""}
       </article>
       <article class="setting-card staffing-settings">
@@ -2493,6 +3169,8 @@
     if (!managerMode) {
       elements.scheduleBuilderModule.hidden = true;
       elements.scheduleAvailabilityModule.hidden = true;
+      elements.schedulePriorityModule.hidden = true;
+      elements.scheduleRecordsModule.hidden = true;
       elements.scheduleRequestsModule.hidden = true;
       document.querySelector("#generateButtonTop").hidden = true;
       return;
@@ -2507,9 +3185,254 @@
     });
     elements.scheduleBuilderModule.hidden = state.scheduleModuleView !== "builder";
     elements.scheduleAvailabilityModule.hidden = state.scheduleModuleView !== "availability";
+    elements.schedulePriorityModule.hidden = state.scheduleModuleView !== "priority";
+    elements.scheduleRecordsModule.hidden = state.scheduleModuleView !== "records";
+    if (state.scheduleModuleView === "priority") renderSchedulingPriority();
+    if (state.scheduleModuleView === "records") renderScheduleRecords();
     elements.scheduleRequestsModule.hidden = false;
     elements.scheduleRequestsModule.open = state.requestsExpanded;
     document.querySelector("#generateButtonTop").hidden = state.scheduleModuleView !== "builder";
+  }
+
+  function scheduleRecordDate(value) {
+    if (!value) return "Not published";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "Date unavailable";
+    return new Intl.DateTimeFormat("en-US", {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    }).format(date);
+  }
+
+  function renderScheduleRecords() {
+    if (state.role !== "manager" || !elements.scheduleRecordsContent) return;
+    const records = state.scheduleHistory;
+    if (state.selectedScheduleRecordId && !findScheduleRecord(state.selectedScheduleRecordId)) {
+      state.selectedScheduleRecordId = "";
+    }
+    const selected = findScheduleRecord(state.selectedScheduleRecordId);
+    const cards = records.map((record) => {
+      const published = record.status === "published";
+      const assignmentCount = (record.assignments || []).length;
+      const rosterCount = scheduleRecordRoster(record).length;
+      return `<article class="schedule-record-card ${published ? "current" : ""}">
+        <div class="schedule-record-copy"><span class="inventory-history-type archive">${published ? "Published" : "Archived"}</span><strong>Week of ${scheduleWeekLabel(record.week_start)}</strong><p>${scheduleRecordDate(record.published_at || record.created_at)}</p><small>Option ${Number(record.option_number) || 1} · ${rosterCount} employees · ${assignmentCount} assignments</small></div>
+        <div class="schedule-record-actions"><button type="button" class="secondary-button compact" data-view-schedule-record="${escapeHtml(record.id)}">View schedule</button><button type="button" class="secondary-button compact" data-print-schedule-record="${escapeHtml(record.id)}">Print / Save PDF</button><button type="button" class="secondary-button compact" data-download-schedule-record="${escapeHtml(record.id)}">Download CSV</button></div>
+      </article>`;
+    }).join("");
+    const selectedMarkup = selected ? `<section class="panel schedule-record-preview" id="selectedScheduleRecord">
+      <div class="panel-heading"><div><p class="eyebrow">Saved record</p><h3>Week of ${scheduleWeekLabel(selected.week_start)}</h3><p>${selected.status === "published" ? "Current published schedule" : "Archived schedule"} · saved in Supabase</p></div><button class="text-button" type="button" data-close-schedule-record>Close</button></div>
+      ${buildScheduleSheet(scheduleRecordOption(selected), selected.week_start, scheduleRecordRoster(selected))}
+      <div class="schedule-record-preview-actions"><button type="button" class="secondary-button compact" data-print-schedule-record="${escapeHtml(selected.id)}">Print / Save PDF</button><button type="button" class="secondary-button compact" data-download-schedule-record="${escapeHtml(selected.id)}">Download CSV</button></div>
+    </section>` : "";
+    elements.scheduleRecordsContent.innerHTML = `<section class="panel schedule-record-intro">
+      <div class="panel-heading"><div><p class="eyebrow">Business records</p><h3>Past schedule library</h3><p>Published schedules stay in Supabase instead of being deleted. Print a PDF or download a CSV whenever you also want a copy outside the Hub.</p></div><span class="count-badge">${records.length}</span></div>
+    </section>
+    ${selectedMarkup}
+    ${records.length ? `<div class="schedule-record-list">${cards}</div>` : `<div class="panel inventory-empty">Your first published schedule will appear here and remain available after a newer schedule replaces it.</div>`}`;
+  }
+
+  function renderSchedulingPriority() {
+    if (state.role !== "manager" || !elements.schedulingPriorityContent) return;
+    const orderedTeam = priorityOrderedTeam();
+    const rows = orderedTeam.map((employee, index) => {
+      const rank = index + 1;
+      const weekendStatus = employee.weekendRequired
+        ? employeeOffersWeekend(employee)
+          ? `<span class="priority-weekend-status ready">Weekend offered</span>`
+          : `<span class="priority-weekend-status missing">Weekend required</span>`
+        : `<span class="priority-weekend-status neutral">No weekend rule</span>`;
+      return `<article class="priority-row ${state.priorityEditing ? "editing" : ""}" data-priority-code="${escapeHtml(employee.code)}">
+        <span class="priority-rank" aria-label="Priority rank ${rank}">${rank}</span>
+        <div class="priority-person"><strong>${escapeHtml(employee.name)}</strong><small>${escapeHtml(employee.code)} · ${employee.skills.length ? employee.skills.map(roleLabel).join(", ") : "Team member"}</small><span class="priority-manager-limits">${employee.minShifts}–${employee.maxShifts} days · ${employee.weekdayRequirement} weekday${employee.weekdayRequirement === 1 ? "" : "s"}</span></div>
+        ${weekendStatus}
+        ${state.priorityEditing ? `<button type="button" class="priority-drag-handle" data-priority-drag-handle data-priority-code="${escapeHtml(employee.code)}" aria-label="Drag ${escapeHtml(employee.name)} to a new priority. Use up and down arrow keys for keyboard reordering."><span aria-hidden="true">≡</span></button>` : ""}
+      </article>`;
+    }).join("");
+    elements.schedulingPriorityContent.innerHTML = `
+      <section class="panel priority-policy-panel">
+        <div class="priority-policy-heading"><div><p class="eyebrow">Manager only</p><h3>Business coverage comes first</h3></div>${state.priorityEditing ? "" : `<button type="button" class="secondary-button compact" data-edit-priority>✎ Edit</button>`}</div>
+        <p>Qualifications and coverage rules are checked first. When more than one qualified employee wants the same shift, the person higher on this list receives that preference first.</p>
+        <div class="priority-policy-callout"><strong>This is not public seniority.</strong><span>Employees do not see their rank. Managers can base the order on reliability, consistency, performance, and current business needs.</span></div>
+        <button type="button" class="priority-availability-link" data-open-availability-rules>Edit minimums, maximums & availability rules →</button>
+      </section>
+      <section class="priority-list" aria-label="Scheduling priority order">${rows}</section>
+      ${state.priorityEditing ? `<div class="priority-edit-actions"><button type="button" class="secondary-button" data-cancel-priority>Cancel</button><button type="button" class="primary-button" data-save-priority ${state.schedulingPolicyBusy ? "disabled" : ""}>${state.schedulingPolicyBusy ? "Saving…" : "Save order"}</button></div><p class="priority-save-note">Press and drag the handle. Keep it near the top or bottom of your iPhone screen and the page will scroll until you lift your finger.</p>` : `<p class="priority-save-note">Minimums, maximums, and weekend availability are edited from Availability. Employees never see these rules or this order.</p>`}`;
+  }
+
+  function beginPriorityEdit() {
+    state.priorityPolicySnapshot = {
+      priorityOrder: [...state.settings.priorityOrder],
+    };
+    state.priorityEditing = true;
+    renderSchedulingPriority();
+  }
+
+  function cancelPriorityEdit() {
+    const snapshot = state.priorityPolicySnapshot;
+    if (snapshot) {
+      state.settings.priorityOrder = [...snapshot.priorityOrder];
+      syncSchedulingPolicy();
+    }
+    state.priorityEditing = false;
+    state.priorityPolicySnapshot = null;
+    state.priorityDragCode = "";
+    renderSchedulingPriority();
+  }
+
+  async function saveSchedulingPolicy() {
+    if (state.role !== "manager" || state.schedulingPolicyBusy) return;
+    syncSchedulingPolicy();
+    state.schedulingPolicyBusy = true;
+    renderSchedulingPriority();
+    const policies = schedulingPolicyPayload();
+    if (state.mode === "supabase") {
+      const { error } = await supabaseClient.rpc("save_staff_scheduling_policy", { p_policies: policies });
+      if (error) {
+        state.schedulingPolicyBusy = false;
+        const setupMissing = /save_staff_scheduling_policy|weekday_days_required|weekend_required|schema cache|function/i.test(error.message || "");
+        showToast(setupMissing ? "The manager scheduling-rules update still needs its Supabase migration." : `Could not save scheduling priority: ${error.message}`);
+        renderSchedulingPriority();
+        return;
+      }
+    } else {
+      saveDemoTeam();
+    }
+    state.schedulingPolicyBusy = false;
+    state.priorityEditing = false;
+    state.priorityPolicySnapshot = null;
+    state.priorityDragCode = "";
+    renderSchedulingPriority();
+    renderAvailabilityMatrix();
+    showToast("Scheduling priority saved.");
+  }
+
+  function schedulingPolicyPayload() {
+    syncSchedulingPolicy();
+    return priorityOrderedTeam().map((employee, index) => ({
+      employee_id: employee.id,
+      schedule_priority: index + 1,
+      min_shifts: employee.minShifts,
+      max_shifts: employee.maxShifts,
+      weekday_days_required: employee.weekdayRequirement,
+      weekend_required: employee.weekendRequired,
+    }));
+  }
+
+  function movePriorityCode(code, direction) {
+    const order = [...state.settings.priorityOrder];
+    const index = order.indexOf(code);
+    const nextIndex = index + direction;
+    if (index < 0 || nextIndex < 0 || nextIndex >= order.length) return false;
+    [order[index], order[nextIndex]] = [order[nextIndex], order[index]];
+    state.settings.priorityOrder = order;
+    syncSchedulingPolicy();
+    renderSchedulingPriority();
+    window.requestAnimationFrame(() => document.querySelector(`[data-priority-drag-handle][data-priority-code="${CSS.escape(code)}"]`)?.focus());
+    return true;
+  }
+
+  function refreshPriorityRanksInPlace() {
+    document.querySelectorAll(".priority-list .priority-row").forEach((row, index) => {
+      const rank = row.querySelector(".priority-rank");
+      if (rank) {
+        rank.textContent = String(index + 1);
+        rank.setAttribute("aria-label", `Priority rank ${index + 1}`);
+      }
+    });
+  }
+
+  function reorderPriorityRowAtPointer(clientX, clientY) {
+    if (!priorityPointerDrag) return;
+    const target = document.elementFromPoint(clientX, clientY)?.closest(".priority-row[data-priority-code]");
+    const { row, list } = priorityPointerDrag;
+    if (!target || target === row || target.parentElement !== list) return;
+    const rect = target.getBoundingClientRect();
+    if (clientY < rect.top + rect.height / 2) list.insertBefore(row, target);
+    else list.insertBefore(row, target.nextElementSibling);
+    refreshPriorityRanksInPlace();
+  }
+
+  function priorityDragAutoScroll() {
+    if (!priorityPointerDrag) return;
+    const edge = Math.min(105, Math.max(70, window.innerHeight * 0.14));
+    const y = priorityPointerDrag.clientY;
+    let speed = 0;
+    if (y < edge) speed = -Math.ceil((edge - y) / 5);
+    else if (y > window.innerHeight - edge) speed = Math.ceil((y - (window.innerHeight - edge)) / 5);
+    speed = Math.max(-22, Math.min(22, speed));
+    if (speed) {
+      window.scrollBy(0, speed);
+      reorderPriorityRowAtPointer(priorityPointerDrag.clientX, priorityPointerDrag.clientY);
+    }
+    priorityPointerDrag.raf = window.requestAnimationFrame(priorityDragAutoScroll);
+  }
+
+  function startPriorityPointerDrag(event, handle) {
+    if (state.role !== "manager" || !state.priorityEditing || priorityPointerDrag || event.button > 0) return;
+    const row = handle.closest(".priority-row[data-priority-code]");
+    const list = row?.parentElement;
+    if (!row || !list?.classList.contains("priority-list")) return;
+    const rect = row.getBoundingClientRect();
+    const ghost = row.cloneNode(true);
+    ghost.classList.add("priority-drag-ghost");
+    ghost.classList.remove("editing");
+    ghost.setAttribute("aria-hidden", "true");
+    Object.assign(ghost.style, {
+      width: `${rect.width}px`,
+      height: `${rect.height}px`,
+      left: `${rect.left}px`,
+      top: `${rect.top}px`,
+    });
+    document.body.append(ghost);
+    row.classList.add("priority-placeholder");
+    document.body.classList.add("priority-is-dragging");
+    state.priorityDragCode = row.dataset.priorityCode;
+    priorityPointerDrag = {
+      pointerId: event.pointerId,
+      handle,
+      row,
+      list,
+      ghost,
+      offsetY: event.clientY - rect.top,
+      clientX: event.clientX,
+      clientY: event.clientY,
+      originalOrder: [...state.settings.priorityOrder],
+      raf: 0,
+    };
+    handle.setPointerCapture?.(event.pointerId);
+    priorityPointerDrag.raf = window.requestAnimationFrame(priorityDragAutoScroll);
+    event.preventDefault();
+  }
+
+  function updatePriorityPointerDrag(event) {
+    if (!priorityPointerDrag || event.pointerId !== priorityPointerDrag.pointerId) return;
+    priorityPointerDrag.clientX = event.clientX;
+    priorityPointerDrag.clientY = event.clientY;
+    priorityPointerDrag.ghost.style.top = `${event.clientY - priorityPointerDrag.offsetY}px`;
+    reorderPriorityRowAtPointer(event.clientX, event.clientY);
+    event.preventDefault();
+  }
+
+  function finishPriorityPointerDrag(cancelled = false) {
+    if (!priorityPointerDrag) return;
+    const drag = priorityPointerDrag;
+    window.cancelAnimationFrame(drag.raf);
+    try { drag.handle.releasePointerCapture?.(drag.pointerId); } catch (_) { /* Pointer capture can already be released by iOS. */ }
+    const order = cancelled
+      ? drag.originalOrder
+      : [...drag.list.querySelectorAll(".priority-row[data-priority-code]")].map((row) => row.dataset.priorityCode);
+    drag.ghost.remove();
+    drag.row.classList.remove("priority-placeholder");
+    document.body.classList.remove("priority-is-dragging");
+    priorityPointerDrag = null;
+    state.priorityDragCode = "";
+    state.settings.priorityOrder = order;
+    syncSchedulingPolicy();
+    renderSchedulingPriority();
   }
 
   function availabilitySlotMarkup(employee, day, shift) {
@@ -2544,10 +3467,11 @@
 
   function renderAvailabilityMatrix() {
     if (state.role !== "manager") return;
-    const targetRow = `<tr class="availability-target-row"><th scope="row"><strong>Monday</strong><small>Store closed · requested days</small></th>${state.team.map((employee) => `<td class="availability-target-cell"><div><input type="number" min="0" max="6" value="${employee.minDays}" data-availability-min="${employee.id}" aria-label="${escapeHtml(employee.name)} minimum days"><span>-</span><input type="number" min="0" max="6" value="${employee.maxDays}" data-availability-max="${employee.id}" aria-label="${escapeHtml(employee.name)} maximum days"></div></td>`).join("")}</tr>`;
+    syncSchedulingPolicy();
+    const targetRow = `<tr class="availability-target-row"><th scope="row"><strong>Monday</strong><small>Store closed</small></th><td class="availability-closed-cell" colspan="${Math.max(1, state.team.length)}">CLOSED</td></tr>`;
     const dayRows = demoData.days.map((day) => `<tr class="availability-day-row"><th scope="row"><strong>${day.name}</strong><small>${day.short}</small></th>${state.team.map((employee) => availabilityShiftCellMarkup(employee, day)).join("")}</tr>`).join("");
     const noteRow = `<tr class="availability-notes-row"><th scope="row"><strong>Notes</strong><small>Rules & preferences</small></th>${state.team.map((employee) => `<td class="availability-note-cell"><textarea rows="2" data-availability-note="${employee.id}" aria-label="${escapeHtml(employee.name)} scheduling note" placeholder="—">${escapeHtml(employee.notes || "")}</textarea></td>`).join("")}</tr>`;
-    const headers = state.team.map((employee) => `<th><strong>${escapeHtml(employee.name)}</strong><small>${escapeHtml(employee.code || "")}</small></th>`).join("");
+    const headers = state.team.map((employee) => `<th><strong>${escapeHtml(employee.name)}</strong><small>P${employee.schedulePriority} · ${escapeHtml(employee.code || "")}</small></th>`).join("");
     const selectedMobileEmployee = state.team.find((employee) => String(employee.id) === String(state.availabilityMobileEmployeeId)) || state.team[0];
     if (selectedMobileEmployee) state.availabilityMobileEmployeeId = selectedMobileEmployee.id;
     const selectedMobileIndex = selectedMobileEmployee ? state.team.findIndex((employee) => String(employee.id) === String(selectedMobileEmployee.id)) : -1;
@@ -2555,19 +3479,26 @@
     const mobileWorkingDays = scheduleWeekRows(state.settings.weekStart).filter((day) => !day.closed);
     const mobileDateFormatter = new Intl.DateTimeFormat("en-US", { month: "numeric", day: "numeric" });
     const mobileDayHeaders = mobileWorkingDays.map((day) => `<th scope="col"><strong>${escapeHtml(day.name.slice(0, 3))}</strong><small>${mobileDateFormatter.format(day.date)}</small></th>`).join("");
-    const mobileOverviewRows = state.team.map((employee) => `<tr><th scope="row"><strong>${escapeHtml(employee.name)}</strong><small>${employee.minDays}-${employee.maxDays}</small></th>${demoData.days.map((day) => mobileAvailabilityOverviewCellMarkup(employee, day)).join("")}</tr>`).join("");
-    const mobileEditor = selectedMobileEmployee ? `<details class="mobile-availability-editor">
-        <summary><span><strong>Edit availability</strong><small>One employee at a time</small></span><span aria-hidden="true">⌄</span></summary>
-        <div class="mobile-availability-editor-body">
+    const mobileOverviewRows = state.team.map((employee) => `<tr><th scope="row"><strong>${escapeHtml(employee.name)}</strong><small>Priority ${employee.schedulePriority}${employee.weekendRequired ? " · weekend" : ""}</small></th>${demoData.days.map((day) => mobileAvailabilityOverviewCellMarkup(employee, day)).join("")}</tr>`).join("");
+    const policyDayOptions = (selected, minimum = 0) => Array.from({ length: 7 - minimum }, (_, optionIndex) => optionIndex + minimum)
+      .map((value) => `<option value="${value}" ${value === selected ? "selected" : ""}>${value}</option>`).join("");
+    const availabilityEditor = selectedMobileEmployee ? `<details class="availability-employee-editor" open>
+        <summary><span><strong>Edit availability & rules</strong><small>Manager-only controls · one employee at a time</small></span><span aria-hidden="true">⌄</span></summary>
+        <div class="availability-employee-editor-body">
           <div class="mobile-availability-picker">
             <button type="button" data-mobile-availability-step="-1" aria-label="Previous employee">‹</button>
             <label><span>Employee ${selectedMobileIndex + 1} of ${state.team.length}</span><select data-mobile-availability-employee aria-label="Choose employee">${mobileEmployeeOptions}</select></label>
             <button type="button" data-mobile-availability-step="1" aria-label="Next employee">›</button>
           </div>
-          <div class="mobile-availability-target">
-            <span><strong>Requested days</strong><small>Minimum–maximum</small></span>
-            <div><input type="number" min="0" max="6" value="${selectedMobileEmployee.minDays}" data-availability-min="${selectedMobileEmployee.id}" aria-label="${escapeHtml(selectedMobileEmployee.name)} minimum days"><span>–</span><input type="number" min="0" max="6" value="${selectedMobileEmployee.maxDays}" data-availability-max="${selectedMobileEmployee.id}" aria-label="${escapeHtml(selectedMobileEmployee.name)} maximum days"></div>
-          </div>
+          <section class="manager-availability-rules" aria-label="Manager-only scheduling rules for ${escapeHtml(selectedMobileEmployee.name)}">
+            <div class="manager-rule-heading"><span><strong>Manager rules</strong><small>Employees do not see or set these values.</small></span><b>Priority ${selectedMobileEmployee.schedulePriority}</b></div>
+            <div class="manager-rule-grid">
+              <label><span>Minimum days</span><select data-policy-min="${escapeHtml(selectedMobileEmployee.code)}">${policyDayOptions(selectedMobileEmployee.minShifts)}</select></label>
+              <label><span>Maximum days</span><select data-policy-max="${escapeHtml(selectedMobileEmployee.code)}">${policyDayOptions(selectedMobileEmployee.maxShifts, 1)}</select></label>
+              <label><span>Weekdays to offer</span><select data-policy-weekdays="${escapeHtml(selectedMobileEmployee.code)}">${Array.from({ length: 5 }, (_, value) => `<option value="${value}" ${value === selectedMobileEmployee.weekdayRequirement ? "selected" : ""}>${value}</option>`).join("")}</select></label>
+              <label class="manager-weekend-rule"><input type="checkbox" data-policy-weekend="${escapeHtml(selectedMobileEmployee.code)}" ${selectedMobileEmployee.weekendRequired ? "checked" : ""}><span><strong>Weekend availability</strong><small>Must offer Saturday or Sunday</small></span></label>
+            </div>
+          </section>
           <div class="mobile-availability-days">${demoData.days.map((day) => `<article class="mobile-availability-day"><header><strong>${day.name}</strong><small>${day.short}</small></header>${availabilityShiftCellMarkup(selectedMobileEmployee, day, "div")}</article>`).join("")}</div>
           <label class="mobile-availability-note"><span>Notes</span><textarea rows="3" data-availability-note="${selectedMobileEmployee.id}" aria-label="${escapeHtml(selectedMobileEmployee.name)} scheduling note" placeholder="No notes">${escapeHtml(selectedMobileEmployee.notes || "")}</textarea></label>
         </div>
@@ -2579,21 +3510,16 @@
           <tbody><tr class="mobile-availability-closed"><th scope="row">Monday</th><td colspan="${mobileWorkingDays.length}">CLOSED</td></tr>${mobileOverviewRows}</tbody>
         </table>
         <p class="mobile-availability-overview-help">Red X = unavailable. A top or bottom X means only that shift is unavailable.</p>
-        ${mobileEditor}
       </section>` : `<section class="availability-mobile-view"><p class="inventory-empty">No active employees.</p></section>`;
     elements.availabilityMatrix.innerHTML = `<div class="availability-matrix-summary"><span><strong>${state.team.length}</strong> active employees</span><span><strong>${scheduleWeekLabel(state.settings.weekStart)}</strong> schedule week</span></div>
       <div class="availability-desktop-view"><div class="availability-matrix-wrap"><table class="availability-matrix"><caption>Team availability for ${scheduleWeekLabel(state.settings.weekStart)}</caption><thead><tr><th>Day</th>${headers}</tr></thead><tbody>${targetRow}${dayRows}${noteRow}</tbody></table></div></div>
       ${mobileAvailability}
+      ${availabilityEditor}
       <div class="availability-matrix-legend"><span><b class="legend-available">blank</b> Available</span><span><b class="legend-preferred">★</b> Preferred</span><span><b class="legend-unavailable">×</b> Cannot work</span><small>A divider appears only when morning and night differ: morning is above the line and night is below it. A large X means the employee cannot work that entire day.</small></div>`;
   }
 
   async function saveAvailabilityMatrix() {
     if (state.role !== "manager" || state.availabilitySheetBusy) return;
-    const invalid = state.team.find((employee) => Number(employee.minDays) > Number(employee.maxDays));
-    if (invalid) {
-      showToast(`${invalid.name}'s minimum cannot be higher than their maximum.`);
-      return;
-    }
     state.availabilitySheetBusy = true;
     const button = document.querySelector("#saveAvailabilitySheet");
     button.disabled = true;
@@ -2605,8 +3531,8 @@
         const payloads = state.team.map((employee) => ({
           employee_id: employee.id,
           week_start: state.settings.weekStart,
-          min_shifts: Number(employee.minDays),
-          max_shifts: Number(employee.maxDays),
+          min_shifts: 0,
+          max_shifts: 6,
           notes: employee.notes || "",
           status: "submitted",
           submitted_at: now,
@@ -2633,13 +3559,15 @@
         });
         const { error: slotError } = await supabaseClient.from("availability_slots").insert(slots);
         if (slotError) throw new Error(slotError.message);
+        const { error: policyError } = await supabaseClient.rpc("save_staff_scheduling_policy", { p_policies: schedulingPolicyPayload() });
+        if (policyError) throw new Error(policyError.message);
       }
       state.team.forEach((employee) => { employee.submitted = true; });
       renderDashboard();
       renderRequests();
       renderAvailabilityMatrix();
       renderScheduleModule();
-      showToast("Availability sheet saved for this schedule week.");
+      showToast("Availability and manager-only scheduling rules saved.");
     } catch (error) {
       showToast(`Could not save availability: ${error.message}`);
     } finally {
@@ -2699,10 +3627,7 @@
           <label class="field-label">Employee name<input name="displayName" maxlength="50" autocomplete="off" placeholder="Example: Nora" required></label>
           <label class="field-label">Employee ID<input name="employeeCode" minlength="4" maxlength="20" autocapitalize="characters" autocomplete="off" placeholder="Example: NORA01" required><small>Letters, numbers, and hyphens only.</small></label>
           <label class="field-label">Seven-digit PIN<input name="password" type="password" inputmode="numeric" pattern="\\d{7}" minlength="7" maxlength="7" autocomplete="new-password" placeholder="Exactly 7 digits" required><small>Tell the employee privately. The app never displays it again.</small></label>
-          <div class="account-days-grid">
-            <label class="field-label">Minimum days<input name="minDays" type="number" min="0" max="6" value="2" required></label>
-            <label class="field-label">Maximum days<input name="maxDays" type="number" min="0" max="6" value="4" required></label>
-          </div>
+          <label class="field-label">Phone number<input name="phoneNumber" type="tel" inputmode="tel" maxlength="30" autocomplete="tel" placeholder="(415) 555-0123" required><small>Visible to active staff in the team directory.</small></label>
         </div>
         ${skillPickerHtml()}
         <div class="account-form-actions"><button id="cancelEmployeeAccountForm" class="secondary-button" type="button">Cancel</button><button class="primary-button compact" type="submit">Create employee account</button></div>
@@ -2730,11 +3655,10 @@
       return;
     }
     const formData = new FormData(form);
-    const minDays = Number(formData.get("minDays"));
-    const maxDays = Number(formData.get("maxDays"));
     const message = form.querySelector("#employeeAccountMessage");
-    if (minDays > maxDays) {
-      message.textContent = "Minimum days cannot be higher than maximum days.";
+    const phoneNumber = String(formData.get("phoneNumber") || "").trim();
+    if (!emergencyPhoneHref(phoneNumber)) {
+      message.textContent = "Enter a valid phone number for the staff directory.";
       return;
     }
     state.accountActionBusy = true;
@@ -2748,8 +3672,9 @@
         displayName: String(formData.get("displayName") || "").trim(),
         employeeCode: String(formData.get("employeeCode") || "").trim().toUpperCase(),
         password: String(formData.get("password") || ""),
-        minDays,
-        maxDays,
+        minDays: 0,
+        maxDays: 6,
+        phoneNumber,
         skills: formData.getAll("skills"),
       });
       const employee = result.employee;
@@ -2759,8 +3684,7 @@
         id: employee.id,
         code: employee.employee_code,
         name: employee.display_name,
-        minDays: employee.min_shifts,
-        maxDays: employee.max_shifts,
+        phone: employee.phone_number || phoneNumber,
         skills: employee.skills || [],
         submitted: false,
         willingDouble: [],
@@ -2858,49 +3782,62 @@
 
   async function removeEmployeeAccess(employeeId) {
     if (state.role !== "manager" || state.mode !== "supabase" || state.accountActionBusy) {
-      showToast(state.mode === "demo" ? "Sign in with the manager account to remove real access." : "Manager access is required.");
+      showToast(state.mode === "demo" ? "Sign in with the manager account to archive real access." : "Manager access is required.");
       return;
     }
     const employee = findManagedEmployee(employeeId);
     if (!employee) return;
-    const approved = window.confirm(`Permanently remove ${employee.name}?\n\nTheir login and availability requests will be deleted. Published schedule history will be preserved. This cannot be undone.`);
+    const approved = window.confirm(`Archive ${employee.name}'s login access?\n\nTheir login will be removed, but their employee record, availability requests, and schedule history will all be kept. If they return, create a login again with the same employee ID.`);
     if (!approved) return;
     state.accountActionBusy = true;
     const button = document.querySelector(`[data-remove-employee="${CSS.escape(employeeId)}"]`);
     if (button) {
       button.disabled = true;
-      button.textContent = "Removing…";
+      button.textContent = "Archiving…";
     }
     try {
       await invokeEmployeeAccountAction({ action: "remove", employeeId });
       state.team = state.team.filter((item) => item.id !== employeeId);
       state.hiddenTeam = state.hiddenTeam.filter((item) => item.id !== employeeId);
+      state.hiddenTeam.push({ ...employee, active: false, hasLogin: false });
+      state.hiddenTeam.sort((a, b) => a.name.localeCompare(b.name));
+      state.teamView = "hidden";
       renderAll();
       openTeamOnHome();
-      showToast(`${employee.name}'s login access was permanently removed.`);
+      showToast(`${employee.name}'s login was archived and their history was kept.`);
     } catch (error) {
       showToast(error.message);
       if (button) {
         button.disabled = false;
-        button.textContent = "Remove access";
+        button.textContent = "Archive access";
       }
     } finally {
       state.accountActionBusy = false;
     }
   }
 
-  function savedAssignmentParts(dayNumber) {
-    return state.employeeAssignments.filter((assignment) => assignment.work_day === dayNumber).map((assignment) => {
-      if (assignment.assignment_type === "AM") return { text: `11:30${assignment.requires_approval ? "*" : ""}`, type: "morning", hours: 6 };
-      if (assignment.assignment_type === "PM") return { text: `5:30${assignment.requires_approval ? "*" : ""}`, type: "night", hours: 5 };
-      if (assignment.assignment_type === "IC") return { text: "IC production", type: "ic", hours: 11, fullDay: true };
-      const [role = "training", shift = "FULL"] = String(assignment.notes || "training:FULL").split(":");
+  function savedAssignmentParts(dayNumber, employeeId = state.profile?.id, scheduleId = selectedEmployeeSchedule()?.id) {
+    return state.employeeAssignments.filter((assignment) =>
+      Number(assignment.work_day) === Number(dayNumber)
+      && (!scheduleId || String(assignment.schedule_id) === String(scheduleId))
+      && assignment.coverage_status !== "open"
+      && String(assignment.employee_id || state.profile?.id) === String(employeeId)
+    ).map((assignment) => {
+      if (assignment.assignment_type === "AM") return { text: `11:30${assignment.requires_approval ? "*" : ""}`, type: "morning", hours: 6, assignmentId: assignment.id };
+      if (assignment.assignment_type === "PM") return { text: `5:30${assignment.requires_approval ? "*" : ""}`, type: "night", hours: 5, assignmentId: assignment.id };
+      if (assignment.assignment_type === "IC") {
+        const productionShift = String(assignment.notes || "").match(/production:(AM|PM)/)?.[1] || "FULL";
+        const label = productionShift === "AM" ? "11:30 IC" : productionShift === "PM" ? "5:30 IC" : "IC";
+        return { text: `${label}${assignment.requires_approval ? "*" : ""}`, type: "ic", hours: 11, fullDay: true, productionShift, assignmentId: assignment.id };
+      }
+      const [, shift = "FULL"] = String(assignment.notes || "training:FULL").split(":");
       const time = shift === "AM" ? "11:30" : shift === "PM" ? "5:30" : "IC";
       return {
-        text: `${time} ${role === "trainee" ? "Training" : "Trainer"}`,
-        type: role === "trainee" ? "trainee" : "trainer",
+        text: time,
+        type: shift === "AM" ? "morning" : shift === "PM" ? "night" : "ic",
         hours: shift === "AM" ? 6 : shift === "PM" ? 5 : 11,
         fullDay: shift === "FULL",
+        assignmentId: assignment.id,
       };
     });
   }
@@ -2910,46 +3847,238 @@
     return parts.reduce((total, part) => total + (part.hours || 0), 0);
   }
 
-  function employeeScheduleParts(employee, day) {
-    if (state.mode === "demo") {
-      const option = state.options[state.publishedOption ?? 0];
-      return option ? scheduleCellParts(option, day.name, employee.id) : [];
+  function employeeScheduleParts(employee, day, schedule = selectedEmployeeSchedule()) {
+    if (!schedule) return [];
+    return savedAssignmentParts(day.number, employee.id, schedule.id);
+  }
+
+  function allPublishedAssignments() {
+    if (state.role !== "manager") return state.employeeAssignments;
+    const published = state.scheduleHistory.find((schedule) => schedule.status === "published" && schedule.week_start === state.settings.weekStart)
+      || state.scheduleHistory.find((schedule) => schedule.status === "published");
+    return published?.assignments || [];
+  }
+
+  function currentPublishedAssignments(schedule = selectedEmployeeSchedule()) {
+    const assignments = allPublishedAssignments();
+    if (!schedule?.id || state.role === "manager") return assignments;
+    return assignments.filter((assignment) => String(assignment.schedule_id) === String(schedule.id));
+  }
+
+  function assignmentEmployee(assignment) {
+    return state.team.find((employee) => String(employee.id) === String(assignment?.employee_id));
+  }
+
+  function assignmentTypeLabel(assignment) {
+    if (assignment?.assignment_type === "AM") return "Morning · 11:30";
+    if (assignment?.assignment_type === "PM") return "Night · 5:30";
+    if (assignment?.assignment_type === "IC") {
+      const productionShift = String(assignment.notes || "").match(/production:(AM|PM)/)?.[1];
+      return productionShift ? `IC · ${productionShift === "AM" ? "morning" : "night"}` : "IC";
     }
-    return savedAssignmentParts(day.number);
+    const shift = String(assignment?.notes || "").split(":")[1] || "FULL";
+    return shift === "AM" ? "Morning · 11:30" : shift === "PM" ? "Night · 5:30" : "IC";
+  }
+
+  function assignmentWeekStart(assignment) {
+    if (assignment?.schedule_week_start) return assignment.schedule_week_start;
+    const scheduleId = assignment?.schedule_id;
+    return state.publishedSchedules.find((schedule) => String(schedule.id) === String(scheduleId))?.week_start
+      || state.scheduleHistory.find((schedule) => String(schedule.id) === String(scheduleId))?.week_start
+      || selectedEmployeeScheduleWeek().weekStart
+      || state.settings.weekStart;
+  }
+
+  function assignmentDateLabel(assignment, weekStart = assignmentWeekStart(assignment)) {
+    const day = demoData.days.find((item) => item.number === Number(assignment?.work_day));
+    if (!day) return "Published shift";
+    const date = new Date(`${weekStart}T12:00:00`);
+    date.setDate(date.getDate() + day.number - 2);
+    const formatted = new Intl.DateTimeFormat("en-US", { weekday: "short", month: "short", day: "numeric" }).format(date);
+    return `${formatted} · ${assignmentTypeLabel(assignment)}`;
+  }
+
+  function shiftRequestAssignment(request, target = false) {
+    const assignmentId = target ? request?.target_assignment_id : request?.assignment_id;
+    const found = allPublishedAssignments().find((assignment) => String(assignment.id) === String(assignmentId));
+    if (found) return found;
+    if (target) return null;
+    return request?.work_day ? { id: assignmentId, employee_id: request.employee_id, work_day: request.work_day, assignment_type: request.assignment_type } : null;
+  }
+
+  function publishedScheduleRoster(schedule = selectedEmployeeSchedule()) {
+    if (state.mode === "demo") return state.team.map(({ id, code, name }) => ({ id, code, name }));
+    const snapshot = Array.isArray(schedule?.roster_snapshot) ? schedule.roster_snapshot : [];
+    if (snapshot.length) return snapshot.map((employee) => ({
+      id: employee.id,
+      code: employee.code || employee.employee_code || "",
+      name: employee.name || employee.display_name || "Employee",
+    }));
+    return (state.staffDirectory.length ? state.staffDirectory : state.team).map((employee) => ({
+      id: employee.id,
+      code: employee.code || "",
+      name: employee.name,
+    }));
+  }
+
+  function teamScheduleGroupMarkup(entries, label, time, className) {
+    return `<section class="published-shift-group ${className}"><header><span>${escapeHtml(label)}</span><strong>${escapeHtml(time)}</strong></header><div>${entries.length ? entries.map((entry) => `<span class="published-coworker ${entry.current ? "current" : ""}"><b>${escapeHtml(entry.name)}</b>${entry.note ? `<small>${escapeHtml(entry.note)}</small>` : ""}</span>`).join("") : `<span class="published-shift-empty">No one assigned</span>`}</div></section>`;
+  }
+
+  function employeeScheduleWeekSwitcherMarkup() {
+    const current = currentScheduleTuesday();
+    const next = addDaysToIso(current, 7);
+    const choices = publishedScheduleChoices();
+    return `<section class="schedule-week-switcher" aria-label="Published schedule weeks">
+      <div><p class="eyebrow">Schedule calendar</p><h3>Current & upcoming weeks</h3><p>Choose a week to see your shifts, coworkers, and shift-change options.</p></div>
+      <div class="schedule-week-choice-list">${choices.map(({ weekStart, schedule }) => {
+        const period = weekStart === current ? "This week" : weekStart === next ? "Next week" : "Upcoming";
+        return `<button type="button" class="schedule-week-choice ${weekStart === state.employeeScheduleWeekStart ? "active" : ""}" data-employee-schedule-week="${weekStart}"><span>${period}</span><strong>${scheduleWeekLabel(weekStart)}</strong><small>${schedule ? "Published" : "Not posted"}</small></button>`;
+      }).join("")}</div>
+    </section>`;
+  }
+
+  function renderPublishedTeamSchedule() {
+    const { weekStart, schedule } = selectedEmployeeScheduleWeek();
+    const hasPublishedSchedule = Boolean(schedule);
+    if (!hasPublishedSchedule) {
+      return `<section class="panel published-team-panel"><div class="panel-heading"><div><p class="eyebrow">Team schedule</p><h3>Who is working · ${scheduleWeekLabel(weekStart)}</h3></div><span class="request-status missing">Not posted</span></div><div class="warning-box">The full team schedule for this week will appear here as soon as a manager publishes it.</div></section>`;
+    }
+    const roster = publishedScheduleRoster(schedule);
+    const dayNumberByName = Object.fromEntries(demoData.days.map((day) => [day.name, day.number]));
+    const dateFormatter = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" });
+    const currentEmployeeId = state.profile?.id;
+    const dayCards = scheduleWeekRows(weekStart).map((day) => {
+      if (day.closed) return `<article class="published-team-day closed"><header><div><span>${day.name}</span><strong>${dateFormatter.format(day.date)}</strong></div><b>Store closed</b></header></article>`;
+      const groups = { AM: [], PM: [], IC: [] };
+      roster.forEach((employee) => {
+        const parts = employeeScheduleParts(employee, { ...day, number: dayNumberByName[day.name] }, schedule);
+        parts.forEach((part) => {
+          const group = part.type === "morning" || part.text.startsWith("11:30")
+            ? "AM"
+            : part.type === "night" || part.text.startsWith("5:30")
+              ? "PM"
+              : "IC";
+          const note = part.type === "ic" ? (part.productionShift === "FULL" ? "" : "IC") : part.text.includes("*") ? "Approval needed" : "";
+          groups[group].push({ name: employee.name, note, current: String(employee.id) === String(currentEmployeeId) });
+        });
+      });
+      return `<article class="published-team-day"><header><div><span>${day.name}</span><strong>${dateFormatter.format(day.date)}</strong></div></header><div class="published-shift-groups">${teamScheduleGroupMarkup(groups.AM, "Morning", "11:30", "morning")}${teamScheduleGroupMarkup(groups.PM, "Night", "5:30", "night")}${teamScheduleGroupMarkup(groups.IC, "IC", "Flexible", "ic")}</div></article>`;
+    }).join("");
+    const uniqueAssignmentEmployees = new Set(currentPublishedAssignments(schedule).map((assignment) => assignment.employee_id).filter(Boolean));
+    const activationNote = state.mode === "supabase" && roster.length > 1 && uniqueAssignmentEmployees.size <= 1
+      ? `<div class="warning-box team-schedule-activation">The published schedule is available, but the team-wide viewing permission still needs the newest Supabase update.</div>`
+      : "";
+    return `<section class="panel published-team-panel">
+      <div class="panel-heading"><div><p class="eyebrow">Published team schedule</p><h3>See who you are working with</h3><p>${scheduleWeekLabel(weekStart)}</p></div><span class="request-status submitted">Published</span></div>
+      ${activationNote}<div class="published-team-days">${dayCards}</div>
+      <p class="portal-note"><strong>Your name is highlighted.</strong> This is the same approved schedule every active employee sees.</p>
+    </section>`;
+  }
+
+  const shiftChangeTypeLabels = {
+    call_off: "Emergency call-off",
+    cover: "Ask the team to cover",
+    swap: "Swap with a coworker",
+  };
+
+  function shiftRequestStatusLabel(request) {
+    if (request.status === "approved") return "Manager approved";
+    if (request.status === "declined") return "Declined";
+    if (request.status === "coworker_accepted") return "Coworker accepted";
+    if (request.status === "awaiting_coworker") return "Waiting for coworker";
+    return request.request_type === "call_off" ? "Manager alerted" : "Open";
+  }
+
+  function shiftChangePanelMarkup(employee) {
+    if (!state.shiftChangeAssignmentId) return "";
+    const assignment = allPublishedAssignments().find((item) => String(item.id) === String(state.shiftChangeAssignmentId));
+    if (!assignment || String(assignment.employee_id) !== String(employee.id)) return "";
+    const swapTargets = allPublishedAssignments().filter((item) =>
+      String(item.schedule_id) === String(assignment.schedule_id)
+      && String(item.employee_id) !== String(employee.id)
+      && ["AM", "PM"].includes(item.assignment_type)
+    );
+    const targetOptions = swapTargets.map((item) => {
+      const coworker = assignmentEmployee(item);
+      return `<option value="${escapeHtml(String(item.id))}">${escapeHtml(coworker?.name || "Coworker")} · ${escapeHtml(assignmentDateLabel(item))}</option>`;
+    }).join("");
+    return `<section class="panel shift-change-panel" id="shiftChangePanel">
+      <div class="shift-change-panel-heading"><div><p class="eyebrow">Published shift</p><h3>${escapeHtml(assignmentDateLabel(assignment))}</h3><p>Choose the kind of help you need. The schedule does not change until a manager approves it.</p></div><button type="button" class="text-button" data-close-shift-change>Close</button></div>
+      <form id="shiftChangeForm" data-assignment-id="${escapeHtml(String(assignment.id))}" data-shift-change-mode="${escapeHtml(state.shiftChangeType)}">
+        <div class="shift-change-options" role="radiogroup" aria-label="Shift request type">
+          ${Object.entries(shiftChangeTypeLabels).map(([value, label]) => `<label class="shift-change-choice ${state.shiftChangeType === value ? "active" : ""}"><input type="radio" name="shiftChangeType" value="${value}" ${state.shiftChangeType === value ? "checked" : ""}><span><strong>${label}</strong><small>${value === "call_off" ? "Emergencies only—managers are alerted immediately." : value === "cover" ? "Coworkers can offer to take this shift." : "Choose a coworker’s published shift to exchange."}</small></span></label>`).join("")}
+        </div>
+        <label class="field-label shift-swap-target" data-swap-target ${state.shiftChangeType === "swap" ? "" : "hidden"}>Shift I want to swap for<select name="targetAssignmentId" ${state.shiftChangeType === "swap" ? "required" : "disabled"}><option value="">Choose a coworker’s shift</option>${targetOptions}</select></label>
+        <label class="field-label">Message for managers<textarea name="note" rows="3" maxlength="500" placeholder="Briefly explain what happened or what coverage you need…" required></textarea></label>
+        <div class="shift-change-submit-row"><p>${state.shiftChangeType === "call_off" ? "This sends an urgent in-app manager alert. Also call the store if the shift is soon." : "A manager must approve any final coverage or swap."}</p><button class="primary-button" type="submit" ${state.shiftChangeBusy ? "disabled" : ""}>${state.shiftChangeBusy ? "Sending…" : state.shiftChangeType === "call_off" ? "Send emergency alert" : "Send request"}</button></div>
+      </form>
+    </section>`;
+  }
+
+  function employeeShiftRequestsMarkup(employee) {
+    const ownRequests = state.shiftChangeRequests.filter((request) => String(request.employee_id) === String(employee.id));
+    const incomingSwaps = state.shiftChangeRequests.filter((request) => {
+      if (request.request_type !== "swap" || request.status !== "awaiting_coworker") return false;
+      const target = shiftRequestAssignment(request, true);
+      return String(target?.employee_id) === String(employee.id);
+    });
+    const openCoverage = state.shiftChangeRequests.filter((request) =>
+      ["call_off", "cover"].includes(request.request_type) && ["pending", "coworker_accepted"].includes(request.status) && String(request.employee_id) !== String(employee.id)
+    );
+    const ownMarkup = ownRequests.map((request) => {
+      const assignment = shiftRequestAssignment(request);
+      return `<article class="employee-shift-request ${request.urgent ? "urgent" : ""}"><div><span>${escapeHtml(shiftChangeTypeLabels[request.request_type] || "Shift request")}</span><strong>${escapeHtml(assignmentDateLabel(assignment || request))}</strong><small>${escapeHtml(shiftRequestStatusLabel(request))}</small></div><b>${escapeHtml(request.status === "approved" ? "Approved" : request.status === "declined" ? "Closed" : "Pending")}</b></article>`;
+    }).join("");
+    const incomingMarkup = incomingSwaps.map((request) => {
+      const requester = state.team.find((item) => String(item.id) === String(request.employee_id));
+      const offered = shiftRequestAssignment(request);
+      const target = shiftRequestAssignment(request, true);
+      return `<article class="coverage-request-card swap"><div><span>Swap request from ${escapeHtml(requester?.name || "Coworker")}</span><strong>${escapeHtml(assignmentDateLabel(target))}</strong><p>They would take your shift and you would take ${escapeHtml(assignmentDateLabel(offered))}.</p></div><div><button type="button" class="secondary-button compact" data-respond-swap="decline" data-shift-request-id="${escapeHtml(String(request.id))}">Decline</button><button type="button" class="primary-button compact" data-respond-swap="accept" data-shift-request-id="${escapeHtml(String(request.id))}">Accept swap</button></div></article>`;
+    }).join("");
+    const coverageMarkup = openCoverage.map((request) => {
+      const requester = state.team.find((item) => String(item.id) === String(request.employee_id));
+      const assignment = shiftRequestAssignment(request);
+      const offeredAlready = (request.shift_cover_offers || []).some((offer) => String(offer.employee_id) === String(employee.id));
+      return `<article class="coverage-request-card ${request.urgent ? "urgent" : ""}"><div><span>${request.urgent ? "Urgent coverage" : "Coverage needed"}</span><strong>${escapeHtml(assignmentDateLabel(assignment || request))}</strong><p>${escapeHtml(requester?.name || "Coworker")} needs someone to cover this shift.</p></div><button type="button" class="secondary-button compact" data-offer-shift-cover="${escapeHtml(String(request.id))}" ${offeredAlready ? "disabled" : ""}>${offeredAlready ? "Offer sent" : "I can cover"}</button></article>`;
+    }).join("");
+    if (!ownMarkup && !incomingMarkup && !coverageMarkup) return "";
+    return `<section class="panel shift-request-center"><div class="panel-heading"><div><p class="eyebrow">Shift changes</p><h3>Coverage & swaps</h3><p>Requests still need manager approval.</p></div></div>${incomingMarkup ? `<div class="shift-request-group"><h4>Needs your answer</h4>${incomingMarkup}</div>` : ""}${coverageMarkup ? `<div class="shift-request-group"><h4>Open coverage</h4>${coverageMarkup}</div>` : ""}${ownMarkup ? `<div class="shift-request-group"><h4>My requests</h4>${ownMarkup}</div>` : ""}</section>`;
   }
 
   function renderEmployeeWeek(employee) {
-    const hasPublishedSchedule = state.mode === "demo" ? state.options.length > 0 : Boolean(state.publishedSchedule);
-    const weekStart = state.mode === "demo"
-      ? state.settings.weekStart
-      : (state.publishedSchedule?.week_start || state.settings.weekStart);
+    const { weekStart, schedule } = selectedEmployeeScheduleWeek();
+    const hasPublishedSchedule = Boolean(schedule);
     const dateFormatter = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" });
     const dayNumberByName = Object.fromEntries(demoData.days.map((day) => [day.name, day.number]));
     let estimatedHours = 0;
     const dayCards = scheduleWeekRows(weekStart).map((day) => {
       if (day.closed) return `<article class="employee-day-card closed"><span>${day.name}</span><strong>Closed</strong><small>${dateFormatter.format(day.date)}</small></article>`;
-      const parts = hasPublishedSchedule ? employeeScheduleParts(employee, { ...day, number: dayNumberByName[day.name] }) : [];
+      const parts = hasPublishedSchedule ? employeeScheduleParts(employee, { ...day, number: dayNumberByName[day.name] }, schedule) : [];
       const dayHours = estimatedDayHours(parts);
       estimatedHours += dayHours;
-      return `<article class="employee-day-card ${parts.length ? "working" : "off"}"><span>${day.name}</span><strong>${parts.length ? parts.map((part) => `<b class="portal-shift ${part.type}">${escapeHtml(part.text)}</b>`).join("") : "Off"}</strong>${dayHours ? `<em>Est. ${dayHours}h</em>` : ""}<small>${dateFormatter.format(day.date)}</small></article>`;
+      const helpAssignment = parts.find((part) => ["morning", "night"].includes(part.type)) || parts[0];
+      return `<article class="employee-day-card ${parts.length ? "working" : "off"}"><span>${day.name}</span><strong>${parts.length ? parts.map((part) => `<b class="portal-shift ${part.type}">${escapeHtml(part.text)}</b>`).join("") : "Off"}</strong>${dayHours ? `<em>Est. ${dayHours}h</em>` : ""}<small>${dateFormatter.format(day.date)}</small>${helpAssignment?.assignmentId ? `<button type="button" class="shift-help-button" data-open-shift-change="${escapeHtml(String(helpAssignment.assignmentId))}">Call off · cover · swap</button>` : ""}</article>`;
     }).join("");
-    return `<section class="panel employee-week-panel">
+    return `${employeeScheduleWeekSwitcherMarkup()}<section class="panel employee-week-panel">
       <div class="panel-heading"><div><p class="eyebrow">My published schedule</p><h3>${scheduleWeekLabel(weekStart)}</h3></div><span class="request-status ${hasPublishedSchedule ? "submitted" : "missing"}">${hasPublishedSchedule ? `Est. ${estimatedHours}h` : "Not posted"}</span></div>
-      ${hasPublishedSchedule ? `<div class="employee-week-grid">${dayCards}</div><p class="portal-note">Morning is estimated at 6 hours and night at 5 hours. IC and full-day training use an 11-hour estimate but actual flexible production time may vary. Contact a manager before treating a double marked * as approved.</p>` : `<div class="warning-box">No schedule has been published for you yet. Your request form is still available below.</div>`}
-    </section>`;
+      ${hasPublishedSchedule ? `<div class="employee-week-grid">${dayCards}</div><p class="portal-note">Morning is estimated at 6 hours and night at 5 hours. IC uses an 11-hour estimate, though actual flexible production time may vary. Contact a manager before treating an assignment marked * as approved.</p>` : `<div class="warning-box">No schedule has been published for this week yet. You can still choose another week above or send a future-date request.</div>`}
+    </section>${shiftChangePanelMarkup(employee)}${employeeShiftRequestsMarkup(employee)}`;
   }
 
   function renderTeamCard(employee, hidden = false) {
     const skills = employee.skills.length ? employee.skills : ["team_member"];
     const emergencyContact = emergencyContactFor(employee);
-    const accessLabel = hidden ? "Hidden" : employee.hasLogin ? "Portal ready" : "Setup needed";
+    const accessLabel = hidden && !employee.hasLogin ? "Access archived" : hidden ? "Hidden" : employee.hasLogin ? "Portal ready" : "Setup needed";
     const accessClass = hidden || !employee.hasLogin ? "missing" : "submitted";
     const actions = hidden
-      ? `<button class="secondary-button employee-action-button" type="button" data-edit-skills="${employee.id}">Edit qualifications</button><button class="primary-button employee-action-button" type="button" data-restore-employee="${employee.id}">Restore employee</button><button class="remove-access-button" type="button" data-remove-employee="${employee.id}">Remove permanently</button>`
-      : `<button class="secondary-button employee-action-button" type="button" data-edit-skills="${employee.id}">Edit qualifications</button><button class="secondary-button employee-action-button" type="button" data-hide-employee="${employee.id}">Hide employee</button><button class="remove-access-button" type="button" data-remove-employee="${employee.id}">Remove permanently</button>`;
+      ? employee.hasLogin
+        ? `<button class="secondary-button employee-action-button" type="button" data-edit-skills="${employee.id}">Edit qualifications</button><button class="primary-button employee-action-button" type="button" data-restore-employee="${employee.id}">Restore employee</button><button class="remove-access-button" type="button" data-remove-employee="${employee.id}">Archive access</button>`
+        : `<button class="secondary-button employee-action-button" type="button" data-edit-skills="${employee.id}">Edit qualifications</button><span class="archived-access-note">History retained. Re-create the login with this employee ID if they return.</span>`
+      : `<button class="secondary-button employee-action-button" type="button" data-edit-skills="${employee.id}">Edit qualifications</button><button class="secondary-button employee-action-button" type="button" data-hide-employee="${employee.id}">Hide employee</button><button class="remove-access-button" type="button" data-remove-employee="${employee.id}">Archive access</button>`;
     return `<article class="team-card ${hidden ? "hidden-team-card" : ""}" data-initial="${escapeHtml(employee.name[0])}">
       <div class="team-card-heading"><div><h3>${escapeHtml(employee.name)}</h3><p>${escapeHtml(employee.code || "No employee ID")}</p></div><span class="request-status ${accessClass}">${accessLabel}</span></div>
-      <p>${employee.minDays}–${employee.maxDays} requested working days</p>
+      <p>${employee.phone ? escapeHtml(employee.phone) : "Phone number needed"}${hidden ? "" : ` · Scheduling priority ${employee.schedulePriority || "—"}`}</p>
       <div class="skill-tags">${skills.map((skill) => `<span class="${skill === "key_holder" ? "key" : skill === "ic_maker" ? "ic" : skill === "trainer" ? "train" : ""}">${skill === "team_member" ? "Team member" : roleLabel(skill)}</span>`).join("")}</div>
       ${state.role === "manager" ? `<button class="emergency-contact-button ${emergencyContact ? "saved" : "missing"}" type="button" data-emergency-contact="${employee.id}" aria-label="${emergencyContact ? `Open ${escapeHtml(employee.name)}'s emergency contact` : `Add an emergency contact for ${escapeHtml(employee.name)}`}"><span class="emergency-contact-icon" aria-hidden="true">☎</span><span class="emergency-contact-copy"><small>Emergency contact</small><strong>${emergencyContact ? escapeHtml(emergencyContact.name) : "Add contact"}</strong><b>${emergencyContact ? `${escapeHtml(emergencyContact.relationship)} · ${escapeHtml(emergencyContact.phone)}` : "Name, relationship, and phone"}</b></span><span class="emergency-contact-arrow" aria-hidden="true">›</span></button>` : ""}
       ${state.role === "manager" ? `<div class="employee-card-actions">${actions}</div>` : ""}
@@ -2977,12 +4106,475 @@
     return state.role === "manager" ? elements.scheduleRequests : elements.employeeRequests;
   }
 
+  function staffDirectoryMarkup() {
+    const contacts = [...(state.staffDirectory.length ? state.staffDirectory : state.team)].sort((a, b) => a.name.localeCompare(b.name));
+    return `<section class="panel staff-directory-panel">
+      <div class="panel-heading"><div><p class="eyebrow">Team contacts</p><h3>Call or message a coworker</h3></div><span class="directory-count">${contacts.length} active</span></div>
+      <p class="staff-directory-intro">Use these numbers for work communication. This directory is visible only to active staff with portal access.</p>
+      <div class="staff-contact-list">${contacts.map((contact) => {
+        const phoneHref = emergencyPhoneHref(contact.phone);
+        const isCurrent = String(contact.id) === String(state.profile?.id) || contact.code === state.profile?.employee_code;
+        return `<article class="staff-contact-card"><span class="staff-contact-avatar">${escapeHtml(contact.name.slice(0, 1).toUpperCase())}</span><div><strong>${escapeHtml(contact.name)}${isCurrent ? " (you)" : ""}</strong><small>${contact.phone ? escapeHtml(contact.phone) : "Phone number not added"}</small></div><div class="staff-contact-actions">${phoneHref ? `<a href="${phoneHref}" aria-label="Call ${escapeHtml(contact.name)}">Call</a><a href="sms:${phoneHref.slice(4)}" aria-label="Message ${escapeHtml(contact.name)}">Message</a>` : `<span>Unavailable</span>`}</div></article>`;
+      }).join("")}</div>
+    </section>`;
+  }
+
+  function chatDirectory() {
+    const people = new Map();
+    [...state.staffDirectory, ...state.team].forEach((person) => {
+      if (person?.id) people.set(String(person.id), { id: person.id, name: person.name || person.display_name || "Employee" });
+    });
+    if (state.profile?.id) people.set(String(state.profile.id), { id: state.profile.id, name: state.profile.display_name || "Me" });
+    return [...people.values()].sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  function chatPersonName(employeeId) {
+    return chatDirectory().find((person) => String(person.id) === String(employeeId))?.name || "Staff member";
+  }
+
+  function chatThreadTitle(thread) {
+    if (thread.thread_type === "team") return "Whole Team";
+    if (thread.thread_type === "direct") {
+      const otherId = (thread.member_ids || []).find((id) => String(id) !== String(state.profile?.id));
+      return otherId ? chatPersonName(otherId) : thread.title || "Direct message";
+    }
+    return thread.title || "Group chat";
+  }
+
+  function directChatThreadFor(employeeId) {
+    return state.chatThreads.find((thread) => thread.thread_type === "direct"
+      && (thread.member_ids || []).some((id) => String(id) === String(state.profile?.id))
+      && (thread.member_ids || []).some((id) => String(id) === String(employeeId))) || null;
+  }
+
+  function latestChatMessage(threadId) {
+    return state.chatMessages
+      .filter((message) => String(message.thread_id) === String(threadId))
+      .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))[0] || null;
+  }
+
+  function chatTimeLabel(value) {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "";
+    const today = new Date();
+    const sameDay = date.toDateString() === today.toDateString();
+    return new Intl.DateTimeFormat("en-US", sameDay
+      ? { hour: "numeric", minute: "2-digit" }
+      : { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }).format(date);
+  }
+
+  function activeChatThread() {
+    if (!state.chatThreads.some((thread) => String(thread.id) === String(state.activeChatThreadId))) {
+      state.activeChatThreadId = state.chatThreads.find((thread) => thread.thread_type === "team")?.id
+        || state.chatThreads[0]?.id
+        || "";
+    }
+    return state.chatThreads.find((thread) => String(thread.id) === String(state.activeChatThreadId)) || null;
+  }
+
+  function renderNewChatForm() {
+    const participants = chatDirectory().filter((person) => String(person.id) !== String(state.profile?.id));
+    return `<form id="newChatForm" class="new-chat-form">
+      <div class="new-chat-heading"><div><p class="eyebrow">New group</p><h3>Choose who can join</h3><p>For a direct message, just tap a coworker in the inbox.</p></div><button type="button" class="text-button" data-close-new-chat>Close</button></div>
+      <input type="hidden" name="chatKind" value="group">
+      <label class="field-label">Group name (optional)<input name="title" maxlength="80" placeholder="Closing crew, IC team…"></label>
+      <fieldset class="chat-participant-picker"><legend>People</legend>${participants.map((person) => `<label><input type="checkbox" name="memberIds" value="${escapeHtml(String(person.id))}"><span class="staff-contact-avatar">${escapeHtml(person.name.slice(0, 1).toUpperCase())}</span><strong>${escapeHtml(person.name)}</strong></label>`).join("")}</fieldset>
+      <button class="primary-button" type="submit">Create group</button>
+    </form>`;
+  }
+
+  function renderMessages() {
+    if (!elements.messages || !state.profile) return;
+    const thread = activeChatThread();
+    const messages = thread
+      ? state.chatMessages.filter((message) => String(message.thread_id) === String(thread.id)).sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)))
+      : [];
+    const contacts = chatDirectory().filter((person) => String(person.id) !== String(state.profile?.id));
+    const activeContactIds = new Set(contacts.map((person) => String(person.id)));
+    const teamThread = state.chatThreads.find((item) => item.thread_type === "team") || null;
+    const groupThreads = state.chatThreads.filter((item) => item.thread_type === "group");
+    const previousDirectThreads = state.chatThreads.filter((item) => {
+      if (item.thread_type !== "direct") return false;
+      const otherId = (item.member_ids || []).find((id) => String(id) !== String(state.profile?.id));
+      return otherId && !activeContactIds.has(String(otherId));
+    });
+    const standardThreadCard = (item, label = "") => {
+      const latest = latestChatMessage(item.id);
+      const title = chatThreadTitle(item);
+      return `<button type="button" class="chat-thread-card ${String(item.id) === String(thread?.id) ? "active" : ""}" data-chat-thread="${escapeHtml(String(item.id))}"><span class="chat-thread-avatar ${item.thread_type}">${item.thread_type === "team" ? "ALL" : escapeHtml(title.slice(0, 2).toUpperCase())}</span><span><strong>${escapeHtml(title)}</strong><small>${latest ? escapeHtml(latest.body) : label || `${(item.member_ids || []).length} members`}</small></span><time>${latest ? escapeHtml(chatTimeLabel(latest.created_at)) : ""}</time></button>`;
+    };
+    const contactCards = contacts.map((person) => {
+      const directThread = directChatThreadFor(person.id);
+      const latest = directThread ? latestChatMessage(directThread.id) : null;
+      const opening = String(state.directChatOpeningId) === String(person.id) && state.messageBusy;
+      const active = directThread && String(directThread.id) === String(thread?.id);
+      return `<button type="button" class="chat-contact-card ${active ? "active" : ""}" data-chat-person="${escapeHtml(String(person.id))}" ${opening ? "disabled" : ""}><span class="chat-contact-avatar">${escapeHtml(person.name.slice(0, 1).toUpperCase())}</span><span class="chat-contact-copy"><strong>${escapeHtml(person.name)}</strong><small>${opening ? "Opening…" : latest ? escapeHtml(latest.body) : directThread ? "No messages yet" : "Start a conversation"}</small></span>${latest ? `<time>${escapeHtml(chatTimeLabel(latest.created_at))}</time>` : `<span class="chat-contact-state">${directThread ? "Open" : "Message"}</span>`}</button>`;
+    }).join("");
+    const groupCards = groupThreads.map((item) => standardThreadCard(item, "Group conversation")).join("");
+    const previousCards = previousDirectThreads.map((item) => standardThreadCard(item, "Previous conversation")).join("");
+    const messageMarkup = messages.map((message) => {
+      const mine = String(message.sender_id) === String(state.profile?.id);
+      return `<article class="chat-message ${mine ? "mine" : "theirs"}"><span>${mine ? "You" : escapeHtml(chatPersonName(message.sender_id))}</span><p>${escapeHtml(message.body)}</p><time>${escapeHtml(chatTimeLabel(message.created_at))}</time></article>`;
+    }).join("");
+    elements.messages.innerHTML = `${state.messagesSetupMissing && state.mode === "supabase" ? `<div class="warning-box">Messages are designed and ready, but the new Messages Supabase migration must be applied before live accounts can use them.</div>` : ""}
+      ${state.newChatOpen ? renderNewChatForm() : ""}
+      <section class="messages-shell ${state.mobileMessagesThreadOpen ? "mobile-thread-open" : ""}">
+        <aside class="chat-thread-list" aria-label="Messages inbox">
+          <div class="chat-thread-list-heading"><div><strong>Inbox</strong><small>${contacts.length} coworkers</small></div><button type="button" data-new-chat aria-label="Create a group chat" title="Create a group chat">＋</button></div>
+          <div class="chat-inbox-scroll">
+            ${teamThread ? `<section class="chat-inbox-section"><h3>Team</h3>${standardThreadCard(teamThread, "Everyone at Swensen’s")}</section>` : ""}
+            <section class="chat-inbox-section"><h3>People</h3>${contactCards || `<p class="chat-empty">No active coworkers found.</p>`}</section>
+            ${groupCards ? `<section class="chat-inbox-section"><h3>Groups</h3>${groupCards}</section>` : ""}
+            ${previousCards ? `<section class="chat-inbox-section"><h3>Previous chats</h3>${previousCards}</section>` : ""}
+          </div>
+        </aside>
+        <section class="chat-room">${thread ? `<header><button type="button" class="chat-back-button" data-chat-back aria-label="Back to inbox">‹</button><span class="chat-room-avatar ${thread.thread_type}">${thread.thread_type === "team" ? "ALL" : escapeHtml(chatThreadTitle(thread).slice(0, 2).toUpperCase())}</span><div><p class="eyebrow">${thread.thread_type === "team" ? "Everyone" : thread.thread_type === "direct" ? "Direct message" : "Group"}</p><h3>${escapeHtml(chatThreadTitle(thread))}</h3><small>${thread.thread_type === "team" ? "All active staff" : thread.thread_type === "direct" ? "Private conversation" : `${(thread.member_ids || []).length} members`}</small></div></header><div class="chat-message-list" data-chat-message-list>${messageMarkup || `<p class="chat-empty">Start the conversation.</p>`}</div><form id="chatMessageForm" data-thread-id="${escapeHtml(String(thread.id))}" class="chat-composer"><label><span class="sr-only">Message</span><textarea name="message" rows="1" maxlength="2000" placeholder="Message ${escapeHtml(chatThreadTitle(thread))}" required></textarea></label><button class="primary-button compact" type="submit" ${state.messageBusy ? "disabled" : ""}>${state.messageBusy ? "Sending…" : "Send"}</button></form>` : `<div class="chat-room-empty"><strong>Choose someone to message</strong><p>Tap any active coworker. Their conversation opens whether you have messaged before or not.</p></div>`}</section>
+      </section>`;
+  }
+
+  async function loadChatData() {
+    if (state.mode === "demo") {
+      const saved = loadDemoMessages();
+      state.chatThreads = saved.threads;
+      state.chatMessages = saved.messages;
+      state.messagesSetupMissing = false;
+      return;
+    }
+    if (!supabaseClient || !state.profile) return;
+    const ensured = await supabaseClient.rpc("ensure_team_chat");
+    if (ensured.error) {
+      state.messagesSetupMissing = /ensure_team_chat|chat_threads|schema cache|function|relation/i.test(ensured.error.message || "");
+      state.chatThreads = [];
+      state.chatMessages = [];
+      return;
+    }
+    const threadResult = await supabaseClient.from("chat_threads")
+      .select("id, title, thread_type, created_by, created_at, updated_at, chat_members(employee_id)")
+      .order("updated_at", { ascending: false });
+    if (threadResult.error) {
+      state.messagesSetupMissing = true;
+      state.chatThreads = [];
+      state.chatMessages = [];
+      return;
+    }
+    state.messagesSetupMissing = false;
+    state.chatThreads = (threadResult.data || []).map((thread) => ({
+      ...thread,
+      member_ids: (thread.chat_members || []).map((member) => member.employee_id),
+    }));
+    const threadIds = state.chatThreads.map((thread) => thread.id);
+    if (!threadIds.length) {
+      state.chatMessages = [];
+      return;
+    }
+    const messageResult = await supabaseClient.from("chat_messages")
+      .select("id, thread_id, sender_id, body, created_at")
+      .in("thread_id", threadIds)
+      .order("created_at", { ascending: true });
+    state.chatMessages = messageResult.error ? [] : messageResult.data || [];
+  }
+
+  async function openDirectChat(employeeId) {
+    if (state.messageBusy || String(employeeId) === String(state.profile?.id)) return;
+    const person = chatDirectory().find((item) => String(item.id) === String(employeeId));
+    if (!person) {
+      showToast("That coworker is no longer active.");
+      return;
+    }
+    const existing = directChatThreadFor(employeeId);
+    if (existing) {
+      state.activeChatThreadId = existing.id;
+      state.newChatOpen = false;
+      state.mobileMessagesThreadOpen = true;
+      renderMessages();
+      return;
+    }
+
+    state.messageBusy = true;
+    state.directChatOpeningId = employeeId;
+    renderMessages();
+    if (state.mode === "demo") {
+      const now = new Date().toISOString();
+      const thread = {
+        id: `preview-chat-${Date.now()}`,
+        title: person.name,
+        thread_type: "direct",
+        member_ids: [state.profile.id, employeeId],
+        created_by: state.profile.id,
+        created_at: now,
+        updated_at: now,
+      };
+      state.chatThreads.unshift(thread);
+      state.activeChatThreadId = thread.id;
+      saveDemoMessages();
+    } else {
+      const { data: threadId, error } = await supabaseClient.rpc("create_chat_thread", {
+        p_title: "",
+        p_member_ids: [employeeId],
+      });
+      if (error) {
+        state.messageBusy = false;
+        state.directChatOpeningId = "";
+        renderMessages();
+        showToast(`Could not open chat: ${error.message}`);
+        return;
+      }
+      state.activeChatThreadId = threadId;
+      await loadChatData();
+    }
+    state.messageBusy = false;
+    state.directChatOpeningId = "";
+    state.newChatOpen = false;
+    state.mobileMessagesThreadOpen = true;
+    renderMessages();
+    window.requestAnimationFrame(() => document.querySelector("#chatMessageForm textarea")?.focus());
+  }
+
+  async function createChat(form) {
+    if (state.messageBusy) return;
+    const data = new FormData(form);
+    const kind = String(data.get("chatKind") || "direct");
+    const memberIds = data.getAll("memberIds").map(String);
+    if (kind === "direct" && memberIds.length !== 1) {
+      showToast("Choose exactly one coworker for a direct message.");
+      return;
+    }
+    if (kind === "group" && memberIds.length < 2) {
+      showToast("Choose at least two coworkers for a group chat.");
+      return;
+    }
+    const title = String(data.get("title") || "").trim();
+    state.messageBusy = true;
+    if (state.mode === "demo") {
+      const thread = {
+        id: `preview-chat-${Date.now()}`,
+        title: kind === "direct" ? chatPersonName(memberIds[0]) : title || memberIds.map(chatPersonName).join(", "),
+        thread_type: kind,
+        member_ids: [state.profile.id, ...memberIds],
+        created_by: state.profile.id,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+      state.chatThreads.unshift(thread);
+      state.activeChatThreadId = thread.id;
+      saveDemoMessages();
+    } else {
+      const { data: threadId, error } = await supabaseClient.rpc("create_chat_thread", {
+        p_title: title,
+        p_member_ids: memberIds,
+      });
+      if (error) {
+        state.messageBusy = false;
+        showToast(`Could not create chat: ${error.message}`);
+        return;
+      }
+      state.activeChatThreadId = threadId;
+      await loadChatData();
+    }
+    state.messageBusy = false;
+    state.newChatOpen = false;
+    state.mobileMessagesThreadOpen = true;
+    renderMessages();
+    showToast(kind === "direct" ? "Direct message ready." : "Group chat created.");
+  }
+
+  async function sendChatMessage(form) {
+    if (state.messageBusy) return;
+    const body = String(new FormData(form).get("message") || "").trim();
+    const threadId = form.dataset.threadId;
+    if (!body || !threadId) return;
+    state.messageBusy = true;
+    if (state.mode === "demo") {
+      state.chatMessages.push({
+        id: `preview-message-${Date.now()}`,
+        thread_id: threadId,
+        sender_id: state.profile.id,
+        body,
+        created_at: new Date().toISOString(),
+      });
+      const thread = state.chatThreads.find((item) => String(item.id) === String(threadId));
+      if (thread) thread.updated_at = new Date().toISOString();
+      saveDemoMessages();
+    } else {
+      const { error } = await supabaseClient.rpc("send_chat_message", { p_thread_id: threadId, p_body: body });
+      if (error) {
+        state.messageBusy = false;
+        showToast(`Could not send message: ${error.message}`);
+        return;
+      }
+      await loadChatData();
+    }
+    state.messageBusy = false;
+    renderMessages();
+    window.requestAnimationFrame(() => {
+      const list = document.querySelector("[data-chat-message-list]");
+      if (list) list.scrollTop = list.scrollHeight;
+    });
+  }
+
+  function employeeItToolsMarkup() {
+    return `<section class="panel employee-it-panel">
+      <div class="panel-heading"><div><p class="eyebrow">Gabriel only</p><h3>IT Tools</h3><p>Check that the Hub and Supabase are responding before store workflows are affected.</p></div><span class="system-check-icon" aria-hidden="true">DB</span></div>
+      <div class="it-tools-content">
+        <div class="system-check-content">
+          <div><p>Runs a real read-and-write check and saves the latest result in Supabase.</p><p class="system-check-message" data-system-check-message role="status">No saved system check yet.</p><div class="system-check-areas" data-system-check-areas aria-label="System check results"></div></div>
+          <button class="primary-button compact" type="button" data-run-database-health-check>Run real health check</button>
+        </div>
+        <details class="recovery-guide"><summary>Supabase pause recovery</summary><ol><li>Open the Swensen’s project in Supabase.</li><li>Choose Restore or Resume and wait for Healthy.</li><li>Return here and run the real health check.</li><li>Test one manager save and one employee login.</li></ol></details>
+        <details class="recovery-guide"><summary>Deployment checklist</summary><ol><li>Run the complete automated tests.</li><li>Apply the newest database update.</li><li>Publish the Hub and run this health check.</li><li>Test scheduling, requests, records, and inventory.</li></ol></details>
+      </div>
+    </section>`;
+  }
+
+  function employeePortalTabsMarkup() {
+    const tabs = [
+      ["schedule", "Schedule"],
+      ["requests", "Requests"],
+      ["availability", "Availability"],
+      ["contacts", "Contacts"],
+      ...(isGabrielAccount() ? [["it", "IT Tools"]] : []),
+    ];
+    return `<div class="employee-portal-tabs" role="tablist" aria-label="Employee portal sections">${tabs.map(([value, label]) => `<button type="button" role="tab" class="employee-portal-tab ${state.employeePortalView === value ? "active" : ""}" data-employee-portal-view="${value}" aria-selected="${state.employeePortalView === value}">${label}${value === "requests" && state.dateRequests.some((request) => String(request.employee_id) === String(state.profile?.id) && dateRequestIsLate(request)) ? `<span class="employee-tab-alert">!</span>` : ""}</button>`).join("")}</div>`;
+  }
+
+  function ensureRequestDraft(employee) {
+    const weeks = upcomingRequestWeeks();
+    if (!state.requestCalendarWeekStart || !weeks.includes(state.requestCalendarWeekStart)) state.requestCalendarWeekStart = weeks[0];
+    if (state.requestDraftWeekStart === state.requestCalendarWeekStart) return;
+    const existing = state.dateRequests.filter((request) =>
+      String(request.employee_id) === String(employee.id) && request.schedule_week_start === state.requestCalendarWeekStart
+    );
+    state.requestDraftWeekStart = state.requestCalendarWeekStart;
+    state.requestDraftDates = Object.fromEntries(existing.map((request) => [request.request_date, request.shift_scope]));
+    state.activeRequestDate = existing[0]?.request_date || "";
+    state.dateRequestKind = existing[0]?.request_kind || "time_off";
+    state.dateRequestNotes = existing[0]?.notes || "";
+  }
+
+  function requestWeekStatus(weekStart, employee) {
+    const requests = state.dateRequests.filter((request) => String(request.employee_id) === String(employee.id) && request.schedule_week_start === weekStart);
+    const published = Boolean(publishedScheduleForWeek(weekStart));
+    const late = Date.now() > requestDeadlineForWeek(weekStart).getTime();
+    if (published) return { className: "published", label: "Schedule published" };
+    if (requests.length) return { className: requests.some(dateRequestIsLate) ? "late" : "sent", label: `${requests.length} date${requests.length === 1 ? "" : "s"} sent` };
+    if (late) return { className: "late", label: "Late request" };
+    return { className: "open", label: "Request open" };
+  }
+
+  function renderDateRequestCalendar(employee) {
+    ensureRequestDraft(employee);
+    const weekStart = state.requestCalendarWeekStart;
+    const deadline = requestDeadlineForWeek(weekStart);
+    const deadlinePassed = Date.now() > deadline.getTime();
+    const published = Boolean(publishedScheduleForWeek(weekStart));
+    const dateFormatter = new Intl.DateTimeFormat("en-US", { weekday: "short", month: "short", day: "numeric" });
+    const compactDateFormatter = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" });
+    const weekButtons = upcomingRequestWeeks().map((value) => {
+      const status = requestWeekStatus(value, employee);
+      return `<button type="button" class="request-week-card ${value === weekStart ? "active" : ""} ${status.className}" data-request-week="${value}"><strong>${scheduleWeekLabel(value)}</strong><small>${status.label}</small></button>`;
+    }).join("");
+    const todayIso = localIsoDate(new Date());
+    const dateButtons = scheduleWeekRows(weekStart).map((day) => {
+      const value = localIsoDate(day.date);
+      const selectedScope = state.requestDraftDates[value];
+      const disabled = day.closed || value < todayIso;
+      return `<button type="button" class="request-date-card ${selectedScope ? "selected" : ""} ${state.activeRequestDate === value ? "active" : ""} ${day.closed ? "closed" : ""}" data-request-date="${value}" ${disabled ? "disabled" : ""}><span>${day.name.slice(0, 3)}</span><strong>${day.date.getDate()}</strong><small>${day.closed ? "Closed" : selectedScope ? requestScopeLabel(selectedScope) : value < todayIso ? "Past" : "Select"}</small></button>`;
+    }).join("");
+    const selectedEntries = Object.entries(state.requestDraftDates).sort(([a], [b]) => a.localeCompare(b));
+    const activeScope = state.activeRequestDate ? state.requestDraftDates[state.activeRequestDate] : "";
+    const activeDateLabel = state.activeRequestDate ? dateFormatter.format(new Date(`${state.activeRequestDate}T12:00:00`)) : "Choose a date above";
+    const selectedSummary = selectedEntries.length
+      ? `<div class="selected-date-requests">${selectedEntries.map(([date, scope]) => `<button type="button" data-request-date="${date}" class="selected-date-chip ${date === state.activeRequestDate ? "active" : ""}"><strong>${compactDateFormatter.format(new Date(`${date}T12:00:00`))}</strong><span>${requestScopeLabel(scope)}</span></button>`).join("")}</div>`
+      : `<p class="date-request-empty">No dates selected yet.</p>`;
+    const deadlineCopy = published
+      ? `<h3>The schedule is already published</h3><p>You can still send this as a schedule-change or call-off notice. Contact a manager directly if it is urgent.</p>`
+      : deadlinePassed
+        ? `<h3>The Thursday deadline passed</h3><p>You can still send the request. Managers will immediately see a red Late alert in their portal.</p>`
+        : `<h3>Submit before Thursday</h3><p>Requests for this schedule are due ${requestDeadlineLabel(weekStart)}.</p>`;
+    return `<form id="dateRequestForm" data-employee-id="${employee.id}" class="date-request-form">
+      <section class="panel request-calendar-panel">
+        <div class="panel-heading"><div><p class="eyebrow">Future dates</p><h3>Request a specific day</h3><p>Choose the schedule week, then tap every date you need.</p></div></div>
+        <div class="request-week-strip" aria-label="Upcoming schedule weeks">${weekButtons}</div>
+        <div class="request-calendar-heading"><div><strong>${scheduleWeekLabel(weekStart)}</strong><span>Monday–Sunday</span></div><span>${published ? "Published" : deadlinePassed ? "Late if sent now" : "Open"}</span></div>
+        <div class="request-date-grid" aria-label="Choose request dates">${dateButtons}</div>
+      </section>
+      <section class="panel request-scope-panel">
+        <div><p class="eyebrow">Selected date</p><h3>${escapeHtml(activeDateLabel)}</h3><p>What part of the day are you requesting off?</p></div>
+        <div class="request-scope-options" role="radiogroup" aria-label="Requested time">${[["ALL_DAY", "All day"], ["AM", "Morning shift only"], ["PM", "Night shift only"]].map(([scope, label]) => `<button type="button" role="radio" aria-checked="${activeScope === scope}" class="request-scope-button ${activeScope === scope ? "active" : ""}" data-request-scope="${scope}" ${state.activeRequestDate ? "" : "disabled"}>${label}</button>`).join("")}</div>
+        ${state.activeRequestDate ? `<button type="button" class="remove-request-date" data-remove-request-date="${state.activeRequestDate}">Remove this date</button>` : ""}
+        ${selectedSummary}
+      </section>
+      <section class="panel request-deadline-panel ${deadlinePassed || published ? "late" : "on-time"}"><div><p class="eyebrow">Thursday reminder</p>${deadlineCopy}</div><span>${published ? "Manager alert" : deadlinePassed ? "Late" : "On time"}</span></section>
+      <section class="panel date-request-details">
+        <label class="field-label">Request type<select id="dateRequestKind" name="requestKind"><option value="time_off" ${state.dateRequestKind === "time_off" ? "selected" : ""}>Time off</option><option value="call_off" ${state.dateRequestKind === "call_off" ? "selected" : ""}>Call-off / schedule change</option></select></label>
+        <label class="field-label">Details for managers<textarea id="dateRequestNotes" name="notes" rows="3" placeholder="Briefly explain the request…">${escapeHtml(state.dateRequestNotes)}</textarea></label>
+        <p>For a call-off or urgent change, contact a manager directly. The Hub creates the record and alert.</p>
+      </section>
+      ${state.dateRequestSetupMissing && state.mode === "supabase" ? `<div class="warning-box">This new request calendar still needs its Supabase update before it can save live requests.</div>` : ""}
+      <button class="primary-button request-submit" type="submit" ${state.dateRequestBusy || !selectedEntries.length ? "disabled" : ""}>${state.dateRequestBusy ? "Sending…" : published ? "Send schedule-change request" : deadlinePassed ? "Send late request" : "Submit date request"}</button>
+    </form>`;
+  }
+
+  function managerDateRequestsMarkup() {
+    const requests = state.dateRequests.filter((request) => request.schedule_week_start === state.settings.weekStart);
+    const cards = requests.sort((a, b) => a.request_date.localeCompare(b.request_date) || String(a.submitted_at).localeCompare(String(b.submitted_at))).map((request) => {
+      const employee = dateRequestEmployee(request);
+      const date = new Intl.DateTimeFormat("en-US", { weekday: "short", month: "short", day: "numeric" }).format(new Date(`${request.request_date}T12:00:00`));
+      const late = dateRequestIsLate(request);
+      return `<article class="manager-date-request ${late ? "late" : ""}"><div><span>${escapeHtml(date)}</span><strong>${escapeHtml(employee?.name || "Employee")}</strong><p>${requestScopeLabel(request.shift_scope)} · ${request.request_kind === "call_off" ? "Call-off / schedule change" : "Time off"}${request.notes ? ` · ${escapeHtml(request.notes)}` : ""}</p></div><span class="request-status ${late ? "late" : "submitted"}">${late ? "Late" : "On time"}</span></article>`;
+    }).join("");
+    const lateCount = requests.filter(dateRequestIsLate).length;
+    return `<section class="manager-date-request-section"><div class="manager-date-request-heading"><div><p class="eyebrow">Specific dates</p><h3>Date requests</h3><p>All-day, morning-only, and night-only requests for ${scheduleWeekLabel(state.settings.weekStart)}.</p></div>${lateCount ? `<span class="late-request-summary">${lateCount} late</span>` : ""}</div>${cards ? `<div class="manager-date-request-list">${cards}</div>` : `<div class="warning-box good">No specific-date requests for this schedule week.</div>`}</section>`;
+  }
+
+  function managerShiftChangesMarkup() {
+    const requests = state.shiftChangeRequests
+      .filter((request) => request.schedule_week_start >= currentScheduleTuesday())
+      .sort((a, b) => a.schedule_week_start.localeCompare(b.schedule_week_start) || String(b.submitted_at).localeCompare(String(a.submitted_at)));
+    const pending = requests.filter((request) => !["approved", "declined", "cancelled"].includes(request.status));
+    const cards = requests.map((request) => {
+      const employee = state.team.find((item) => String(item.id) === String(request.employee_id));
+      const assignment = shiftRequestAssignment(request);
+      const target = shiftRequestAssignment(request, true);
+      const targetEmployee = assignmentEmployee(target);
+      const offers = request.shift_cover_offers || [];
+      const offerNames = offers.map((offer) => state.team.find((item) => String(item.id) === String(offer.employee_id))?.name).filter(Boolean);
+      const closed = ["approved", "declined", "cancelled"].includes(request.status);
+      return `<article class="manager-shift-request ${request.urgent ? "urgent" : ""}">
+        <div class="manager-shift-request-copy"><span>${request.urgent ? "Urgent call-off" : escapeHtml(shiftChangeTypeLabels[request.request_type] || "Shift change")}</span><strong>${escapeHtml(employee?.name || "Employee")} · ${escapeHtml(assignmentDateLabel(assignment || request))}</strong><p>${escapeHtml(request.note || "No message provided.")}</p>${target ? `<small>Requested swap: ${escapeHtml(targetEmployee?.name || "Coworker")} · ${escapeHtml(assignmentDateLabel(target))}</small>` : ""}${offerNames.length ? `<small>Coverage offers: ${escapeHtml(offerNames.join(", "))}</small>` : ""}</div>
+        <div class="manager-shift-request-actions"><b class="request-status ${request.urgent && !closed ? "late" : closed ? "submitted" : "missing"}">${escapeHtml(shiftRequestStatusLabel(request))}</b>${closed ? "" : `<button type="button" class="secondary-button compact" data-review-shift-change="decline" data-shift-request-id="${escapeHtml(String(request.id))}">Decline</button><button type="button" class="primary-button compact" data-review-shift-change="approve" data-shift-request-id="${escapeHtml(String(request.id))}">Approve</button>`}</div>
+      </article>`;
+    }).join("");
+    return `<section class="manager-shift-change-section"><div class="manager-date-request-heading"><div><p class="eyebrow">Published shift alerts</p><h3>Call-offs, coverage & swaps</h3><p>Current and upcoming published schedules appear here. Urgent requests trigger a live in-app manager alert; SMS can be connected after a phone provider is approved.</p></div>${pending.length ? `<span class="late-request-summary">${pending.length} open</span>` : ""}</div>${cards ? `<div class="manager-shift-request-list">${cards}</div>` : `<div class="warning-box good">No current or upcoming shift-change requests.</div>`}</section>`;
+  }
+
+  function renderEmployeePortal() {
+    const employee = state.team.find((item) => String(item.id) === String(state.profile?.id)) || state.team.find((item) => item.code === state.profile?.employee_code);
+    if (!employee) {
+      requestHost().innerHTML = `<div class="warning-box">This account is not linked to an active employee record yet.</div>`;
+      return;
+    }
+    if (state.employeePortalView === "it" && !isGabrielAccount()) state.employeePortalView = "schedule";
+    const content = state.employeePortalView === "requests"
+      ? renderDateRequestCalendar(employee)
+      : state.employeePortalView === "availability"
+        ? weeklyAvailabilityFormMarkup(employee, false)
+        : state.employeePortalView === "contacts"
+          ? staffDirectoryMarkup()
+          : state.employeePortalView === "it"
+            ? employeeItToolsMarkup()
+            : `${renderEmployeeWeek(employee)}${renderPublishedTeamSchedule()}`;
+    requestHost().innerHTML = `${employeePortalTabsMarkup()}<div class="employee-portal-content">${content}</div>`;
+    if (state.employeePortalView === "availability") renderAvailabilityPreview(document.querySelector("#requestForm"));
+    if (state.employeePortalView === "it") renderSystemCheckStatus();
+  }
+
   function renderRequests() {
     if (state.role !== "manager") {
       document.querySelector("#requestPageEyebrow").textContent = "Employee portal";
-      document.querySelector("#requestPageTitle").textContent = "My schedule & request";
-      document.querySelector("#requestPageCopy").textContent = "See your assigned shifts and update only your own weekly availability.";
-      renderRequestForm(state.profile.id);
+      document.querySelector("#requestPageTitle").textContent = "Schedule, requests & team";
+      document.querySelector("#requestPageCopy").textContent = "See the published team schedule, request future dates, and contact coworkers.";
+      renderEmployeePortal();
       return;
     }
     document.querySelector("#requestPageEyebrow").textContent = "Availability";
@@ -2992,9 +4584,12 @@
       renderRequestForm(state.editingEmployeeId);
       return;
     }
-    requestHost().innerHTML = `<div class="request-toolbar"><div><strong>${scheduleWeekLabel(state.settings.weekStart)}</strong><p>${state.team.filter((employee) => employee.submitted).length} of ${state.team.length} submitted</p></div></div>
+    const lateCount = state.team.filter(isRequestLate).length + state.dateRequests.filter((request) => request.schedule_week_start === state.settings.weekStart && dateRequestIsLate(request)).length;
+    requestHost().innerHTML = `<div class="request-toolbar"><div><strong>${scheduleWeekLabel(state.settings.weekStart)}</strong><p>${state.team.filter((employee) => employee.submitted).length} of ${state.team.length} submitted · Due ${requestDeadlineLabel(state.settings.weekStart)}</p></div>${lateCount ? `<span class="late-request-summary">${lateCount} late</span>` : ""}</div>
+      ${managerShiftChangesMarkup()}
+      ${managerDateRequestsMarkup()}
       <div class="request-list">${state.team.map((employee) => `
-        <button class="request-card request-open" data-edit-request="${employee.id}"><span><h3>${escapeHtml(employee.name)}</h3><p>${employee.submitted ? `${employee.minDays}–${employee.maxDays} days · ${employee.willingDouble.length ? "Can double " + employee.willingDouble.join(", ") : "No doubles offered"}` : "Waiting for this week's request"}</p></span><span class="request-status ${employee.submitted ? "submitted" : "missing"}">${employee.submitted ? "Submitted" : "Missing"}</span></button>`).join("")}</div>`;
+        <button class="request-card request-open ${isRequestLate(employee) ? "late" : ""}" data-edit-request="${employee.id}"><span><h3>${escapeHtml(employee.name)}</h3><p>${employee.submitted ? `${requestTypeLabels[employee.requestType || "weekly_availability"]} · ${employee.willingDouble.length ? "Can double " + employee.willingDouble.join(", ") : "No doubles offered"}` : "Waiting for this week's request"}</p></span><span class="request-status ${isRequestLate(employee) ? "late" : employee.submitted ? "submitted" : "missing"}">${isRequestLate(employee) ? "Late" : employee.submitted ? "Submitted" : "Missing"}</span></button>`).join("")}</div>`;
   }
 
   function availabilityPreviewData(form) {
@@ -3031,11 +4626,7 @@
       }
       return { ...day, label, entries, minHours, maxHours };
     });
-    return {
-      days,
-      minDays: Math.max(0, Math.min(6, Number(form.elements.minDays?.value) || 0)),
-      maxDays: Math.max(0, Math.min(6, Number(form.elements.maxDays?.value) || 0)),
-    };
+    return { days };
   }
 
   function renderAvailabilityPreview(form) {
@@ -3044,10 +4635,8 @@
     const employee = state.team.find((item) => item.id === form.dataset.employeeId);
     const draft = availabilityPreviewData(form);
     const availableDays = draft.days.filter((day) => day.maxHours > 0);
-    const lowerCount = Math.min(draft.minDays, availableDays.length);
-    const upperCount = Math.min(Math.max(draft.minDays, draft.maxDays), availableDays.length);
-    const lowHours = availableDays.map((day) => day.minHours).sort((a, b) => a - b).slice(0, lowerCount).reduce((sum, hours) => sum + hours, 0);
-    const highHours = availableDays.map((day) => day.maxHours).sort((a, b) => b - a).slice(0, upperCount).reduce((sum, hours) => sum + hours, 0);
+    const weekdayAvailable = draft.days.filter((day) => ["Tuesday", "Wednesday", "Thursday", "Friday"].includes(day.name) && day.maxHours > 0).length;
+    const weekendAvailable = draft.days.some((day) => ["Saturday", "Sunday"].includes(day.name) && day.maxHours > 0);
     const dateFormatter = new Intl.DateTimeFormat("en-US", { month: "numeric", day: "numeric" });
     const byName = Object.fromEntries(draft.days.map((day) => [day.name, day]));
     const rows = scheduleWeekRows(state.settings.weekStart).map((day) => {
@@ -3056,14 +4645,17 @@
       const availability = byName[day.name];
       return `<tr class="${availability.maxHours ? "" : "unavailable-row"}"><th>${heading}</th><td>${availability.entries}<small class="availability-cell-note">${escapeHtml(availability.label)}</small></td></tr>`;
     }).join("");
-    const targetWarning = availableDays.length < draft.minDays
-      ? `<p class="availability-warning">Only ${availableDays.length} available day${availableDays.length === 1 ? "" : "s"} selected for a ${draft.minDays}-day minimum.</p>`
+    const weekendStatus = employee?.weekendRequired
+      ? `<span class="${weekendAvailable ? "weekend-ready" : "weekend-missing"}"><strong>${weekendAvailable ? "✓" : "!"}</strong> ${weekendAvailable ? "Weekend offered" : "Weekend availability required"}</span>`
+      : `<span><strong>✓</strong> Standard availability rule</span>`;
+    const weekdayReady = weekdayAvailable >= Number(employee?.weekdayRequirement || 0);
+    const weekdayStatus = employee?.weekdayRequirement
+      ? `<span class="${weekdayReady ? "weekend-ready" : "weekend-missing"}"><strong>${weekdayReady ? "✓" : "!"}</strong> ${weekdayAvailable}/${employee.weekdayRequirement} weekdays</span>`
       : "";
-    preview.innerHTML = `<div class="availability-summary"><span><strong>${availableDays.length}</strong> days available</span><span><strong>${lowHours === highHours ? lowHours : `${lowHours}–${highHours}`}</strong> estimated hours</span></div>
-      ${targetWarning}
+    preview.innerHTML = `<div class="availability-summary"><span><strong>${availableDays.length}</strong> days available</span>${weekdayStatus}${weekendStatus}</div>
       <div class="schedule-sheet-wrap availability-sheet-wrap"><table class="schedule-sheet availability-sheet"><caption>Possible week · ${scheduleWeekLabel(state.settings.weekStart)}</caption><thead><tr><th class="day-column">Day</th><th>${escapeHtml(employee?.name || "Me")}</th></tr></thead><tbody>${rows}</tbody></table></div>
       <div class="schedule-legend"><span><b>11:30</b> Morning · 6h</span><span><b>5:30</b> Night · 5h</span><span><b>×</b> Can't work</span></div>
-      <p class="portal-note">This is an availability preview, not a confirmed schedule. Estimated hours use your requested day range and may change when the manager publishes the schedule.</p>`;
+      <p class="portal-note">This is an availability preview, not a confirmed schedule. Final days, shifts, and hours are set from store coverage and business needs.</p>`;
   }
 
   function syncAvailabilityDayControls(form, dayName) {
@@ -3082,12 +4674,7 @@
     dayOffButton.setAttribute("aria-pressed", String(allDayOff));
   }
 
-  function renderRequestForm(employeeId) {
-    const employee = state.team.find((item) => item.id === employeeId) || state.team.find((item) => item.code === state.profile.employee_code);
-    if (!employee) {
-      requestHost().innerHTML = `<div class="warning-box">This account is not linked to an active employee record yet.</div>`;
-      return;
-    }
+  function weeklyAvailabilityFormMarkup(employee, managerMode = state.role === "manager") {
     const dayRows = demoData.days.map((day) => {
       const am = employee.availability?.[day.name]?.AM || "available";
       const pm = employee.availability?.[day.name]?.PM || "available";
@@ -3103,21 +4690,38 @@
       </div>`;
     }).join("");
 
-    requestHost().innerHTML = `${state.role === "manager" ? `<button id="backToRequests" class="text-button back-button">← All employee requests</button>` : renderEmployeeWeek(employee)}
-      <form id="requestForm" data-employee-id="${employee.id}" class="request-form">
-        <section class="panel request-intro"><p class="eyebrow">Week of ${scheduleWeekLabel(state.settings.weekStart)}</p><h3>${state.role === "manager" ? `${escapeHtml(employee.name)}’s request` : "My availability request"}</h3><p>Unavailable is treated as a hard rule. Preferred shifts receive priority when possible. This request week moves forward automatically as each new scheduling week approaches.</p></section>
-        <section class="panel">
-          <div class="shift-targets">
-            <label class="field-label">Minimum working days<input name="minDays" type="number" min="0" max="6" value="${employee.minDays}" required></label>
-            <label class="field-label">Maximum working days<input name="maxDays" type="number" min="0" max="6" value="${employee.maxDays}" required></label>
-          </div>
-          <p class="target-help">A double shift still counts as one working day. For example, 3 days could be two doubles and one single shift.</p>
+    const deadline = requestDeadlineForWeek(state.settings.weekStart);
+    const deadlinePassed = Date.now() > deadline.getTime();
+    const requestType = employee.requestType || "weekly_availability";
+    const requestTypeOption = (value) => `<option value="${value}" ${requestType === value ? "selected" : ""}>${requestTypeLabels[value]}</option>`;
+    const availabilityRule = employee.weekendRequired || employee.weekdayRequirement
+      ? `<section class="panel weekend-requirement-card"><span class="weekend-rule-icon" aria-hidden="true">✓</span><div><p class="eyebrow">Availability needed</p><h3>${employee.weekdayRequirement ? `Offer ${employee.weekdayRequirement} weekday${employee.weekdayRequirement === 1 ? "" : "s"}` : "Weekday availability is flexible"}${employee.weekendRequired ? " + one weekend day" : ""}</h3><p>Choose at least one morning or night shift on each day you offer. These are availability requirements—not guaranteed shifts.</p></div></section>`
+      : "";
+
+    return `<form id="requestForm" data-employee-id="${employee.id}" class="request-form">
+        <section class="panel request-intro"><p class="eyebrow">Week of ${scheduleWeekLabel(state.settings.weekStart)}</p><h3>${managerMode ? `${escapeHtml(employee.name)}’s availability` : "My availability for next week"}</h3><p>Tell management when you can and cannot work. Final days, hours, and shifts are assigned from store coverage and business needs.</p></section>
+        <section class="panel request-deadline-panel ${deadlinePassed ? "late" : "on-time"}">
+          <div><p class="eyebrow">Thursday cutoff</p><h3>${deadlinePassed ? "The regular deadline has passed" : "Submit by Thursday"}</h3><p>Due ${requestDeadlineLabel(state.settings.weekStart)}—at least one week before the schedule starts. Late requests are still sent, but managers receive a late alert.</p></div><span>${deadlinePassed ? "Late if sent now" : "On time"}</span>
         </section>
+        <section class="panel request-type-panel">
+          <label class="field-label">What are you submitting?<select name="requestType">${requestTypeOption("weekly_availability")}${requestTypeOption("time_off")}${requestTypeOption("call_off")}</select></label>
+          <p>For a call-off, also contact a manager directly. The portal creates a visible record; it does not replace urgent communication.</p>
+        </section>
+        ${availabilityRule}
         <section class="panel availability-preview-panel"><div class="panel-heading"><div><p class="eyebrow">Live preview</p><h3>What my week could look like</h3></div></div><div id="availabilityPreview" aria-live="polite"></div></section>
         <section class="panel"><div class="panel-heading"><div><p class="eyebrow">Availability</p><h3>Morning, night, or both</h3></div></div><div class="availability-grid">${dayRows}</div></section>
-        <section class="panel"><label class="field-label">Notes for managers<textarea name="notes" rows="3" placeholder="Anything the scheduler should know…">${escapeHtml(employee.notes || "")}</textarea></label></section>
-        <button class="primary-button request-submit" type="submit">Submit weekly request</button>
+        <section class="panel"><label class="field-label">Details for managers<textarea name="notes" rows="3" placeholder="Explain time off, a call-off, or anything the scheduler should know…">${escapeHtml(employee.notes || "")}</textarea></label></section>
+        <button class="primary-button request-submit" type="submit">${deadlinePassed ? "Send late request" : "Submit weekly request"}</button>
       </form>`;
+  }
+
+  function renderRequestForm(employeeId) {
+    const employee = state.team.find((item) => item.id === employeeId) || state.team.find((item) => item.code === state.profile.employee_code);
+    if (!employee) {
+      requestHost().innerHTML = `<div class="warning-box">This account is not linked to an active employee record yet.</div>`;
+      return;
+    }
+    requestHost().innerHTML = `${state.role === "manager" ? `<button id="backToRequests" class="text-button back-button">← All employee requests</button>` : ""}${weeklyAvailabilityFormMarkup(employee)}`;
     renderAvailabilityPreview(document.querySelector("#requestForm"));
   }
 
@@ -3202,19 +4806,38 @@
     const employee = state.team.find((item) => item.id === form.dataset.employeeId);
     if (!employee) return;
     const formData = new FormData(form);
-    const minDays = Number(formData.get("minDays"));
-    const maxDays = Number(formData.get("maxDays"));
-    if (minDays > maxDays) {
-      showToast("Minimum days cannot be higher than maximum days.");
-      return;
-    }
     const availability = {};
     const willingDouble = [];
     demoData.days.forEach((day) => {
       availability[day.name] = { AM: formData.get(`${day.name}-AM`), PM: formData.get(`${day.name}-PM`) };
       if (formData.get(`double-${day.name}`)) willingDouble.push(day.name);
     });
-    Object.assign(employee, { minDays, maxDays, availability, willingDouble, notes: formData.get("notes") || "", submitted: true });
+    const requestType = String(formData.get("requestType") || "weekly_availability");
+    const offersWeekend = ["Saturday", "Sunday"].some((day) =>
+      availability[day]?.AM !== "unavailable" || availability[day]?.PM !== "unavailable"
+    );
+    const weekdaysOffered = ["Tuesday", "Wednesday", "Thursday", "Friday"].filter((day) =>
+      availability[day]?.AM !== "unavailable" || availability[day]?.PM !== "unavailable"
+    ).length;
+    if (requestType !== "call_off" && weekdaysOffered < Number(employee.weekdayRequirement || 0)) {
+      showToast(`Please offer at least ${employee.weekdayRequirement} weekday${employee.weekdayRequirement === 1 ? "" : "s"} before submitting.`);
+      return;
+    }
+    if (employee.weekendRequired && requestType !== "call_off" && !offersWeekend) {
+      showToast("Please offer at least one Saturday or Sunday shift before submitting.");
+      return;
+    }
+    const submittedAt = new Date().toISOString();
+    const lateRequest = new Date(submittedAt).getTime() > requestDeadlineForWeek(state.settings.weekStart).getTime();
+    Object.assign(employee, {
+      availability,
+      willingDouble,
+      notes: formData.get("notes") || "",
+      requestType,
+      submittedAt,
+      lateRequest,
+      submitted: true,
+    });
 
     if (state.mode === "demo") saveDemoTeam();
 
@@ -3222,14 +4845,21 @@
       const requestPayload = {
         employee_id: employee.id,
         week_start: state.settings.weekStart,
-        min_shifts: minDays,
-        max_shifts: maxDays,
+        min_shifts: 0,
+        max_shifts: 6,
         notes: employee.notes,
+        request_kind: requestType,
         status: "submitted",
         submitted_at: new Date().toISOString(),
       };
-      const { data: request, error } = await supabaseClient.from("weekly_requests")
+      let { data: request, error } = await supabaseClient.from("weekly_requests")
         .upsert(requestPayload, { onConflict: "employee_id,week_start" }).select().single();
+      if (error && /request_kind/i.test(error.message || "")) {
+        const legacyRequestPayload = { ...requestPayload };
+        delete legacyRequestPayload.request_kind;
+        ({ data: request, error } = await supabaseClient.from("weekly_requests")
+          .upsert(legacyRequestPayload, { onConflict: "employee_id,week_start" }).select().single());
+      }
       if (error) {
         showToast(`Could not save request: ${error.message}`);
         return;
@@ -3257,7 +4887,256 @@
       navigate("schedule");
       renderScheduleModule();
     }
-    showToast(`${employee.name}'s weekly request was saved.`);
+    showToast(lateRequest ? `${employee.name}'s request was sent and flagged late.` : `${employee.name}'s weekly request was saved.`);
+  }
+
+  async function saveDateRequests(form) {
+    const employee = state.team.find((item) => String(item.id) === String(form.dataset.employeeId));
+    if (!employee || state.dateRequestBusy) return;
+    const selections = Object.entries(state.requestDraftDates).sort(([a], [b]) => a.localeCompare(b));
+    if (!selections.length) {
+      showToast("Choose at least one future date first.");
+      return;
+    }
+    const formData = new FormData(form);
+    const weekStart = state.requestCalendarWeekStart;
+    const requestKind = String(formData.get("requestKind") || state.dateRequestKind || "time_off");
+    const notes = String(formData.get("notes") || state.dateRequestNotes || "").trim();
+    const submittedAt = new Date().toISOString();
+    const late = new Date(submittedAt).getTime() > requestDeadlineForWeek(weekStart).getTime();
+    const scheduleWasPublished = Boolean(publishedScheduleForWeek(weekStart));
+    state.dateRequestBusy = true;
+    renderEmployeePortal();
+
+    if (state.mode === "demo") {
+      state.dateRequests = state.dateRequests.filter((request) => !(String(request.employee_id) === String(employee.id) && request.schedule_week_start === weekStart));
+      selections.forEach(([requestDate, shiftScope], index) => state.dateRequests.push({
+        id: `preview-date-${employee.id}-${requestDate}-${index}`,
+        employee_id: employee.id,
+        request_date: requestDate,
+        schedule_week_start: weekStart,
+        shift_scope: shiftScope,
+        request_kind: requestKind,
+        notes,
+        status: "submitted",
+        is_late: late,
+        schedule_was_published: scheduleWasPublished,
+        submitted_at: submittedAt,
+      }));
+      saveDemoDateRequests();
+    } else if (state.mode === "supabase") {
+      const { data, error } = await supabaseClient.rpc("replace_date_requests", {
+        p_employee_id: employee.id,
+        p_week_start: weekStart,
+        p_requests: selections.map(([request_date, shift_scope]) => ({ request_date, shift_scope })),
+        p_request_kind: requestKind,
+        p_notes: notes,
+      });
+      if (error) {
+        state.dateRequestBusy = false;
+        state.dateRequestSetupMissing = /replace_date_requests|date_requests|schema cache|function/i.test(error.message || "");
+        renderEmployeePortal();
+        showToast(state.dateRequestSetupMissing ? "The new request calendar still needs its Supabase update." : `Could not save request: ${error.message}`);
+        return;
+      }
+      const returnedRequests = Array.isArray(data?.requests) ? data.requests : [];
+      if (returnedRequests.length) {
+        state.dateRequests = state.dateRequests.filter((request) => !(String(request.employee_id) === String(employee.id) && request.schedule_week_start === weekStart));
+        state.dateRequests.push(...returnedRequests);
+      } else {
+        await loadDateRequestsForPortal();
+      }
+      state.dateRequestSetupMissing = false;
+    }
+
+    state.dateRequestKind = requestKind;
+    state.dateRequestNotes = notes;
+    state.dateRequestBusy = false;
+    state.requestDraftWeekStart = "";
+    renderEmployeePortal();
+    showToast(scheduleWasPublished ? "Schedule-change request sent; managers were alerted." : late ? "Late request sent; managers were alerted." : "Date request sent to management.");
+  }
+
+  async function submitShiftChangeRequest(form) {
+    if (state.shiftChangeBusy) return;
+    const employee = state.team.find((item) => String(item.id) === String(state.profile?.id)) || state.team.find((item) => item.code === state.profile?.employee_code);
+    const assignment = allPublishedAssignments().find((item) => String(item.id) === String(form.dataset.assignmentId));
+    if (!employee || !assignment || String(assignment.employee_id) !== String(employee.id)) {
+      showToast("That published shift could not be found.");
+      return;
+    }
+    const formData = new FormData(form);
+    const requestType = String(formData.get("shiftChangeType") || state.shiftChangeType || "cover");
+    const targetAssignmentId = requestType === "swap" ? String(formData.get("targetAssignmentId") || "") : "";
+    const note = String(formData.get("note") || "").trim();
+    if (!note) {
+      showToast("Add a short message so managers know what is happening.");
+      return;
+    }
+    if (requestType === "swap" && !targetAssignmentId) {
+      showToast("Choose the coworker shift you want to swap for.");
+      return;
+    }
+    if (requestType === "call_off" && !window.confirm("Send an emergency call-off alert to managers? This is for emergencies only and does not automatically remove you from the schedule.")) return;
+    state.shiftChangeBusy = true;
+    renderEmployeePortal();
+    if (state.mode === "demo") {
+      state.shiftChangeRequests.unshift({
+        id: `preview-shift-request-${Date.now()}`,
+        schedule_week_start: assignmentWeekStart(assignment),
+        assignment_id: assignment.id,
+        employee_id: employee.id,
+        request_type: requestType,
+        target_assignment_id: targetAssignmentId || null,
+        status: requestType === "swap" ? "awaiting_coworker" : "pending",
+        urgent: requestType === "call_off",
+        note,
+        work_day: assignment.work_day,
+        assignment_type: assignment.assignment_type,
+        submitted_at: new Date().toISOString(),
+        shift_cover_offers: [],
+      });
+      saveDemoShiftChanges();
+    } else {
+      const { data, error } = await supabaseClient.rpc("create_shift_change_request", {
+        p_assignment_id: assignment.id,
+        p_request_type: requestType,
+        p_target_assignment_id: targetAssignmentId || null,
+        p_note: note,
+      });
+      if (error) {
+        state.shiftChangeBusy = false;
+        state.shiftChangeSetupMissing = /create_shift_change_request|shift_change_requests|schema cache|function/i.test(error.message || "");
+        renderEmployeePortal();
+        showToast(state.shiftChangeSetupMissing ? "The call-off and coverage workflow still needs its Supabase migration." : `Could not send shift request: ${error.message}`);
+        return;
+      }
+      if (data) state.shiftChangeRequests.unshift(data);
+      await loadShiftChangeRequests();
+    }
+    state.shiftChangeBusy = false;
+    state.shiftChangeAssignmentId = "";
+    state.shiftChangeType = "cover";
+    renderEmployeePortal();
+    showToast(requestType === "call_off" ? "Emergency call-off sent; managers were alerted." : requestType === "swap" ? "Swap request sent to your coworker and managers." : "Coverage request posted to the team.");
+  }
+
+  async function offerShiftCover(requestId) {
+    const employee = state.team.find((item) => String(item.id) === String(state.profile?.id)) || state.team.find((item) => item.code === state.profile?.employee_code);
+    const request = state.shiftChangeRequests.find((item) => String(item.id) === String(requestId));
+    if (!employee || !request) return;
+    if (state.mode === "demo") {
+      request.shift_cover_offers = request.shift_cover_offers || [];
+      if (!request.shift_cover_offers.some((offer) => String(offer.employee_id) === String(employee.id))) {
+        request.shift_cover_offers.push({ id: `preview-cover-${Date.now()}`, employee_id: employee.id, offered_at: new Date().toISOString(), note: "" });
+      }
+      request.status = "coworker_accepted";
+      saveDemoShiftChanges();
+    } else {
+      const { error } = await supabaseClient.rpc("offer_shift_coverage", { p_request_id: requestId, p_note: "" });
+      if (error) {
+        showToast(`Could not send coverage offer: ${error.message}`);
+        return;
+      }
+      await loadShiftChangeRequests();
+    }
+    renderEmployeePortal();
+    showToast("Your coverage offer was sent to the employee and managers.");
+  }
+
+  async function respondToShiftSwap(requestId, response) {
+    const request = state.shiftChangeRequests.find((item) => String(item.id) === String(requestId));
+    if (!request) return;
+    if (state.mode === "demo") {
+      request.status = response === "accept" ? "coworker_accepted" : "declined";
+      saveDemoShiftChanges();
+    } else {
+      const { error } = await supabaseClient.rpc("respond_to_shift_swap", { p_request_id: requestId, p_response: response });
+      if (error) {
+        showToast(`Could not update the swap: ${error.message}`);
+        return;
+      }
+      await loadShiftChangeRequests();
+    }
+    renderEmployeePortal();
+    showToast(response === "accept" ? "Swap accepted and sent to managers for approval." : "Swap declined.");
+  }
+
+  async function reviewShiftChangeRequest(requestId, decision) {
+    const request = state.shiftChangeRequests.find((item) => String(item.id) === String(requestId));
+    if (!request || state.role !== "manager") return;
+    if (state.mode === "demo") {
+      request.status = decision === "approve" ? "approved" : "declined";
+      saveDemoShiftChanges();
+    } else {
+      const selectedOffer = (request.shift_cover_offers || [])[0]?.employee_id || null;
+      const { error } = await supabaseClient.rpc("review_shift_change_request", {
+        p_request_id: requestId,
+        p_decision: decision,
+        p_selected_cover_employee_id: selectedOffer,
+        p_manager_note: "",
+      });
+      if (error) {
+        showToast(`Could not review shift request: ${error.message}`);
+        return;
+      }
+      await loadShiftChangeRequests();
+      await loadScheduleHistory();
+    }
+    renderDashboard();
+    renderRequests();
+    showToast(decision === "approve" ? "Shift change approved." : "Shift change declined.");
+  }
+
+  function scheduleAssignmentPayload(option) {
+    const dayNumber = Object.fromEntries(demoData.days.map((day) => [day.name, day.number]));
+    const rows = [];
+    Object.entries(option.schedule).forEach(([day, record]) => {
+      ["AM", "PM"].forEach((shift) => record[shift].forEach((assignment) => rows.push({
+        employee_id: assignment.employeeId, work_day: dayNumber[day],
+        assignment_type: shift, shift_credits: 1, is_double: assignment.isDouble,
+        requires_approval: assignment.requiresApproval, approved: !assignment.requiresApproval,
+        notes: assignment.isIcSplit ? "ic_split_floor" : "",
+      })));
+      record.IC.forEach((assignment) => rows.push({
+        employee_id: assignment.employeeId, work_day: dayNumber[day],
+        assignment_type: "IC", shift_credits: 2,
+        requires_approval: Boolean(assignment.requiresApproval), approved: !assignment.requiresApproval,
+        notes: assignment.productionShift && assignment.productionShift !== "FULL" ? `production:${assignment.productionShift};floor:${assignment.floorShift}` : "",
+      }));
+      record.training.filter((assignment) => assignment.shiftCredits > 0).forEach((assignment) => rows.push({
+        employee_id: assignment.employeeId, work_day: dayNumber[day],
+        assignment_type: "TRAINING", shift_credits: assignment.shiftCredits, approved: true,
+        notes: `${assignment.role || "training"}:${assignment.shift || "FULL"}${assignment.isIcSplit ? ":ic_split" : ""}`,
+      }));
+    });
+    return rows;
+  }
+
+  function demoPublishedScheduleRecords(option) {
+    const current = currentScheduleTuesday();
+    const weeks = [...new Set([current, addDaysToIso(current, 7), addDaysToIso(current, 14), state.settings.weekStart])]
+      .filter((weekStart) => weekStart >= current)
+      .sort();
+    return weeks.slice(0, 4).map((weekStart, index) => {
+      const scheduleId = `preview-published-${weekStart}`;
+      return {
+        id: scheduleId,
+        week_start: weekStart,
+        status: "published",
+        published_at: new Date(Date.now() - index * 60000).toISOString(),
+        roster_snapshot: state.team.map((employee) => ({ id: employee.id, code: employee.code, name: employee.name })),
+        assignments: scheduleAssignmentPayload(option).map((assignment) => {
+          const day = demoData.days.find((item) => item.number === assignment.work_day);
+          return {
+            ...assignment,
+            id: demoAssignmentId(assignment.employee_id, day?.name || assignment.work_day, assignment.assignment_type, weekStart),
+            schedule_id: scheduleId,
+            coverage_status: "assigned",
+          };
+        }),
+      };
+    });
   }
 
   async function saveScheduleOption(optionIndex) {
@@ -3270,46 +5149,23 @@
       return;
     }
 
-    const { data: scheduleRecord, error } = await supabaseClient.from("schedules").insert({
-      week_start: state.settings.weekStart,
-      option_number: optionIndex + 1,
-      score: option.score,
-      status: "draft",
-      warnings: option.warnings,
-      created_by: state.profile.id,
-    }).select().single();
-    if (error) {
-      showToast(`Could not save schedule: ${error.message}`);
-      return;
-    }
-
-    const dayNumber = Object.fromEntries(demoData.days.map((day) => [day.name, day.number]));
-    const rows = [];
-    Object.entries(option.schedule).forEach(([day, record]) => {
-      ["AM", "PM"].forEach((shift) => record[shift].forEach((assignment) => rows.push({
-        schedule_id: scheduleRecord.id, employee_id: assignment.employeeId, work_day: dayNumber[day],
-        assignment_type: shift, shift_credits: 1, is_double: assignment.isDouble,
-        requires_approval: assignment.requiresApproval, approved: !assignment.requiresApproval,
-      })));
-      record.IC.forEach((assignment) => rows.push({
-        schedule_id: scheduleRecord.id, employee_id: assignment.employeeId, work_day: dayNumber[day],
-        assignment_type: "IC", shift_credits: 2, approved: true,
-      }));
-      record.training.filter((assignment) => assignment.shiftCredits > 0).forEach((assignment) => rows.push({
-        schedule_id: scheduleRecord.id, employee_id: assignment.employeeId, work_day: dayNumber[day],
-        assignment_type: "TRAINING", shift_credits: assignment.shiftCredits, approved: true,
-        notes: `${assignment.role || "training"}:${assignment.shift || "FULL"}`,
-      }));
+    const { data: scheduleId, error } = await supabaseClient.rpc("save_schedule_draft", {
+      p_week_start: state.settings.weekStart,
+      p_option_number: optionIndex + 1,
+      p_score: option.score,
+      p_warnings: option.warnings,
+      p_assignments: scheduleAssignmentPayload(option),
+      p_roster: state.team.map((employee) => ({ id: employee.id, code: employee.code, name: employee.name })),
     });
-    const { error: assignmentError } = await supabaseClient.from("schedule_assignments").insert(rows);
-    if (assignmentError) {
-      showToast(`Draft created, but assignments failed: ${assignmentError.message}`);
+    if (error) {
+      const setupMissing = /save_schedule_draft|schema cache|function/i.test(error.message || "");
+      showToast(setupMissing ? "Schedule safety update is missing. Apply the newest Supabase migration first." : `Could not save schedule: ${error.message}`);
       return;
     }
-    state.savedScheduleIds[optionIndex] = scheduleRecord.id;
+    state.savedScheduleIds[optionIndex] = scheduleId;
     state.selectedOption = optionIndex;
     renderScheduleResults();
-    showToast("Schedule draft saved for manager review.");
+    showToast("Schedule and every assignment were saved together as one draft.");
   }
 
   async function publishScheduleOption(optionIndex) {
@@ -3319,23 +5175,45 @@
       showToast("Save this option as a draft first.");
       return;
     }
-    const { error: archiveError } = await supabaseClient.from("schedules")
-      .update({ status: "archived" }).eq("week_start", state.settings.weekStart).eq("status", "published");
-    if (archiveError) {
-      showToast(`Could not replace the previous schedule: ${archiveError.message}`);
-      return;
-    }
-    const { error } = await supabaseClient.from("schedules").update({
-      status: "published",
-      published_at: new Date().toISOString(),
-    }).eq("id", scheduleId);
+    const { error } = await supabaseClient.rpc("publish_schedule", { p_schedule_id: scheduleId });
     if (error) {
-      showToast(`Could not publish schedule: ${error.message}`);
+      const setupMissing = /publish_schedule|schema cache|function/i.test(error.message || "");
+      showToast(setupMissing ? "Schedule safety update is missing. Apply the newest Supabase migration first." : `Could not publish schedule: ${error.message}`);
       return;
     }
     state.publishedOption = optionIndex;
+    await loadScheduleHistory();
     renderScheduleResults();
-    showToast("Schedule published to employee portals.");
+    showToast("Schedule published safely; the previous version remains in Records.");
+  }
+
+  async function loadScheduleHistory() {
+    if (!supabaseClient) return;
+    const { data: schedules, error } = await supabaseClient.from("schedules")
+      .select("id, week_start, option_number, score, status, warnings, roster_snapshot, created_at, published_at")
+      .in("status", ["published", "archived"])
+      .order("week_start", { ascending: false })
+      .order("published_at", { ascending: false, nullsFirst: false })
+      .limit(104);
+    if (error) {
+      state.scheduleHistory = [];
+      return;
+    }
+    const scheduleIds = (schedules || []).map((schedule) => schedule.id);
+    let assignments = [];
+    if (scheduleIds.length) {
+      const result = await supabaseClient.from("schedule_assignments")
+        .select("id, schedule_id, employee_id, work_day, assignment_type, shift_credits, is_double, requires_approval, approved, coverage_status, notes")
+        .in("schedule_id", scheduleIds)
+        .order("work_day");
+      if (!result.error) assignments = result.data || [];
+    }
+    state.scheduleHistory = (schedules || []).map((schedule) => ({
+      ...schedule,
+      assignments: assignments.filter((assignment) => assignment.schedule_id === schedule.id),
+    }));
+    if (state.selectedScheduleRecordId && !findScheduleRecord(state.selectedScheduleRecordId)) state.selectedScheduleRecordId = "";
+    if (state.scheduleModuleView === "records") renderScheduleRecords();
   }
 
   async function loadSupabaseApp(session) {
@@ -3359,18 +5237,36 @@
       return;
     }
 
+    const { data: directoryRows } = await supabaseClient.from("staff_directory")
+      .select("employee_id, display_name, phone_number");
+    const directoryByEmployeeId = new Map((directoryRows || []).map((row) => [row.employee_id, row.phone_number]));
+    state.staffDirectory = teamRows.filter((employee) => employee.active).map((employee) => ({
+      id: employee.id,
+      code: employee.employee_code,
+      name: employee.display_name,
+      phone: directoryByEmployeeId.get(employee.id) || "",
+    }));
+
     const mappedTeam = teamRows.filter((employee) => employee.account_role !== "manager").map((employee) => {
       const recurring = recurringAvailabilityFor(employee);
+      const baseAvailability = clone(recurring?.availability || demoData.availability());
+      const baseWillingDouble = clone(recurring?.willingDouble || []);
       return {
         id: employee.id,
         code: employee.employee_code,
         name: employee.display_name,
-        minDays: recurring?.minDays ?? employee.min_shifts,
-        maxDays: recurring?.maxDays ?? employee.max_shifts,
+        phone: directoryByEmployeeId.get(employee.id) || recurring?.phone || "",
+        schedulePriority: Number(employee.schedule_priority) || recurring?.schedulePriority || (seniorityRank.get(employee.employee_code) ?? state.team.length) + 1,
+        minShifts: Number.isFinite(Number(employee.min_shifts)) ? Number(employee.min_shifts) : recurring?.minShifts ?? 2,
+        maxShifts: Number.isFinite(Number(employee.max_shifts)) ? Number(employee.max_shifts) : recurring?.maxShifts ?? 4,
+        weekdayRequirement: Number.isFinite(Number(employee.weekday_days_required)) ? Number(employee.weekday_days_required) : recurring?.weekdayRequirement ?? 2,
+        weekendRequired: typeof employee.weekend_required === "boolean" ? employee.weekend_required : recurring?.weekendRequired,
         skills: employee.employee_skills.map((row) => row.skill),
         submitted: Boolean(recurring),
-        willingDouble: clone(recurring?.willingDouble || []),
-        availability: clone(recurring?.availability || demoData.availability()),
+        willingDouble: clone(baseWillingDouble),
+        baseWillingDouble,
+        availability: clone(baseAvailability),
+        baseAvailability,
         notes: recurring?.notes || "",
         avoidDays: clone(recurring?.avoidDays || []),
         maxWeekendDays: recurring?.maxWeekendDays,
@@ -3391,10 +5287,11 @@
     (requestRows || []).forEach((request) => {
       const employee = state.team.find((item) => item.id === request.employee_id);
       if (!employee) return;
-      employee.minDays = request.min_shifts;
-      employee.maxDays = request.max_shifts;
       employee.notes = request.notes;
       employee.submitted = true;
+      employee.submittedAt = request.submitted_at;
+      employee.lateRequest = new Date(request.submitted_at).getTime() > requestDeadlineForWeek(request.week_start).getTime();
+      employee.requestType = request.request_kind || "weekly_availability";
       employee.willingDouble = [];
       request.availability_slots.forEach((slot) => {
         const day = demoData.days.find((item) => item.number === slot.work_day);
@@ -3406,6 +5303,9 @@
 
     const { data: savedSettings } = await supabaseClient.from("week_settings").select("*").eq("week_start", state.settings.weekStart).maybeSingle();
     const loadedSettings = clone(demoData.defaultSettings);
+    loadedSettings.priorityOrder = [...state.team]
+      .sort((a, b) => a.schedulePriority - b.schedulePriority)
+      .map((employee) => employee.code);
     const demoDefaultTrainee = demoData.team.find((employee) => String(employee.id) === String(loadedSettings.traineeId));
     const liveDefaultTrainee = state.team.find((employee) => employee.code === demoDefaultTrainee?.code);
     loadedSettings.traineeId = liveDefaultTrainee?.id || null;
@@ -3418,6 +5318,7 @@
         trainingEnabled: savedSettings.training_enabled,
         traineeId: savedSettings.trainee_id,
         trainingSkill: savedSettings.training_skill,
+        weekendPriorityStart: savedSettings.weekend_priority_start || loadedSettings.weekendPriorityStart,
       });
     }
     if (loadedSettings.trainingEnabled && !state.team.some((employee) => String(employee.id) === String(loadedSettings.traineeId))) {
@@ -3433,16 +5334,28 @@
     state.settings = loadedSettings;
 
     state.publishedSchedule = null;
+    state.publishedSchedules = [];
     state.employeeAssignments = [];
-    if (profile.account_role !== "manager") {
-      const { data: publishedSchedule } = await supabaseClient.from("schedules")
-        .select("id, week_start, published_at").eq("status", "published")
-        .order("published_at", { ascending: false }).limit(1).maybeSingle();
-      state.publishedSchedule = publishedSchedule || null;
-      if (publishedSchedule) {
+    state.employeeScheduleWeekStart = "";
+    state.scheduleHistory = [];
+    state.selectedScheduleRecordId = "";
+    if (profile.account_role === "manager") {
+      await loadScheduleHistory();
+    } else {
+      const { data: publishedSchedules } = await supabaseClient.from("schedules")
+        .select("id, week_start, published_at, roster_snapshot").eq("status", "published")
+        .gte("week_start", currentScheduleTuesday())
+        .order("week_start", { ascending: true }).limit(8);
+      state.publishedSchedules = publishedSchedules || [];
+      state.employeeScheduleWeekStart = state.publishedSchedules.find((schedule) => schedule.week_start === currentScheduleTuesday())?.week_start
+        || state.publishedSchedules[0]?.week_start
+        || currentScheduleTuesday();
+      state.publishedSchedule = selectedEmployeeSchedule();
+      if (state.publishedSchedules.length) {
+        const scheduleIds = state.publishedSchedules.map((schedule) => schedule.id);
         const { data: assignments } = await supabaseClient.from("schedule_assignments")
-          .select("work_day, assignment_type, requires_approval, approved, notes")
-          .eq("schedule_id", publishedSchedule.id).eq("employee_id", profile.id);
+          .select("id, schedule_id, employee_id, work_day, assignment_type, shift_credits, is_double, requires_approval, approved, coverage_status, notes")
+          .in("schedule_id", scheduleIds);
         state.employeeAssignments = assignments || [];
       }
     }
@@ -3456,8 +5369,14 @@
       state.inventoryError = "";
     }
 
+    const appProfile = { ...profile, email: session.user.email || "", display_name: profile.display_name, account_role: profile.account_role, skills: state.profileSkills };
+    if (isGabrielAccount(appProfile)) await loadLatestSystemHealthCheck(appProfile);
     state.mode = "supabase";
-    openApp({ ...profile, email: session.user.email || "", display_name: profile.display_name, account_role: profile.account_role, skills: state.profileSkills });
+    state.profile = appProfile;
+    await loadDateRequestsForPortal({ role: profile.account_role, weekStart: state.settings.weekStart });
+    await loadShiftChangeRequests({ role: profile.account_role });
+    await loadChatData();
+    openApp(appProfile);
     startRequestSync();
   }
 
@@ -3504,24 +5423,71 @@
     document.querySelector("#todayLabel").textContent = today;
     state.emergencyContacts = loadEmergencyContacts();
     const previewView = new URLSearchParams(window.location.search).get("preview");
-    const previewMode = window.location.hostname === "terminal.local" && ["schedule", "inventory", "team", "reports"].includes(previewView);
+    const previewHost = window.location.hostname === "terminal.local" || window.location.hostname.endsWith(".chatgpt.site");
+    const employeePreviewViews = new Set(["employee", "employee-requests", "employee-availability", "employee-contacts", "employee-messages", "it"]);
+    const previewMode = previewHost && ["schedule", "priority", "records", "employee", "employee-requests", "employee-availability", "employee-contacts", "employee-messages", "messages", "inventory", "team", "reports", "it"].includes(previewView);
     if (previewMode) {
       state.mode = "demo";
       const previewByCode = new Map(demoData.team.map((employee) => [employee.code, clone(employee)]));
       loadDemoTeam().forEach((employee) => previewByCode.set(employee.code, employee));
       const previewTeam = [...previewByCode.values()];
-      state.team = sortTeamBySeniority(previewTeam.filter((employee) => activeSeniorityCodes.has(employee.code)));
+      state.team = sortTeamBySeniority(previewTeam.filter((employee) => activeSeniorityCodes.has(employee.code))).map((employee) => ({
+        ...employee,
+        baseAvailability: clone(employee.baseAvailability || employee.availability),
+        baseWillingDouble: clone(employee.baseWillingDouble || employee.willingDouble || []),
+      }));
+      state.staffDirectory = state.team.map(({ id, code, name, phone }) => ({ id, code, name, phone }));
+      state.dateRequests = loadDemoDateRequests();
+      state.shiftChangeRequests = loadDemoShiftChanges();
       state.hiddenTeam = previewTeam
         .filter((employee) => !activeSeniorityCodes.has(employee.code))
         .map((employee) => ({ ...employee, active: false, hasLogin: true }))
         .sort((a, b) => a.name.localeCompare(b.name));
-      state.scheduleModuleView = "availability";
+      state.scheduleModuleView = previewView === "priority" ? "priority" : previewView === "records" ? "records" : "availability";
+      const previewSchedules = scheduler.generateOptions(state.team, state.settings, 2);
+      state.scheduleHistory = previewSchedules.map((option, index) => {
+        const week = new Date(`${state.settings.weekStart}T12:00:00`);
+        week.setDate(week.getDate() - ((index + 1) * 7));
+        const weekStart = week.toISOString().slice(0, 10);
+        const savedAt = new Date(Date.now() - ((index + 1) * 7 * 86400000)).toISOString();
+        return {
+          id: `preview-schedule-${index + 1}`,
+          week_start: weekStart,
+          option_number: index + 1,
+          score: option.score,
+          status: index === 0 ? "published" : "archived",
+          warnings: option.warnings,
+          roster_snapshot: state.team.map((employee) => ({ id: employee.id, code: employee.code, name: employee.name })),
+          assignments: scheduleAssignmentPayload(option).map((assignment) => {
+            const day = demoData.days.find((item) => item.number === assignment.work_day);
+            return { ...assignment, id: demoAssignmentId(assignment.employee_id, day?.name || assignment.work_day, assignment.assignment_type), schedule_id: `preview-schedule-${index + 1}` };
+          }),
+          created_at: savedAt,
+          published_at: savedAt,
+        };
+      });
       if (previewView === "inventory" || previewView === "reports") loadInventoryPreviewData();
       if (previewView === "team" && !state.emergencyContacts["demo-paul"]) {
         state.emergencyContacts["demo-paul"] = { name: "Sample Contact", relationship: "Mother", phone: "(415) 555-0142" };
       }
-      openApp({ id: "preview-manager", employee_code: "SWENSENSMANAGER", display_name: "Manager Preview", account_role: "manager", skills: ["manager"] });
-      navigate(previewView === "inventory" ? "inventory" : previewView === "reports" ? "reports" : previewView === "team" ? "home" : "schedule");
+      if (employeePreviewViews.has(previewView)) {
+        state.role = "manager";
+        syncSchedulingPolicy();
+        state.options = scheduler.generateOptions(state.team, state.settings, 1);
+        state.publishedOption = 0;
+        state.publishedSchedules = demoPublishedScheduleRecords(state.options[0]);
+        state.employeeAssignments = state.publishedSchedules.flatMap((schedule) => schedule.assignments);
+        state.employeeScheduleWeekStart = currentScheduleTuesday();
+        state.publishedSchedule = selectedEmployeeSchedule();
+        state.employeePortalView = previewView === "employee-requests" ? "requests" : previewView === "employee-availability" ? "availability" : previewView === "employee-contacts" ? "contacts" : previewView === "it" ? "it" : "schedule";
+        state.isItPreview = previewView === "it";
+        openApp(previewView === "it"
+          ? { id: "demo-gabriel", employee_code: "GABRIEL01", email: "gsilva0r.sf@gmail.com", display_name: "Gabriel", account_role: "employee", skills: ["ic_maker", "trainer"] }
+          : { id: "demo-gianna", employee_code: "GIANNA01", display_name: "Gianna", account_role: "employee", skills: [] });
+      } else {
+        openApp({ id: "preview-manager", employee_code: "SWENSENSMANAGER", display_name: "Manager Preview", account_role: "manager", skills: ["manager"] });
+      }
+      navigate(previewView === "inventory" ? "inventory" : previewView === "reports" ? "reports" : previewView === "team" ? "home" : ["messages", "employee-messages"].includes(previewView) ? "messages" : "schedule");
       if (previewView === "team") document.querySelector("#homeTeamDrawer").open = true;
       if (previewView === "reports") loadInventoryReport();
       return;
@@ -3541,7 +5507,6 @@
   });
   elements.loginForm.addEventListener("submit", handleLogin);
   elements.logoutButton.addEventListener("click", closeApp);
-  elements.runDatabaseHealthCheck.addEventListener("click", runDatabaseHealthCheck);
   elements.removeEmergencyContact.addEventListener("click", removeEmergencyContact);
   elements.emergencyContactDialog.addEventListener("cancel", () => {
     state.emergencyContactEmployeeId = "";
@@ -3554,6 +5519,129 @@
   document.querySelector("#generateButtonTop").addEventListener("click", generateSchedules);
 
   document.addEventListener("click", (event) => {
+    const healthCheckButton = event.target.closest("[data-run-database-health-check]");
+    if (healthCheckButton) {
+      runDatabaseHealthCheck();
+      return;
+    }
+
+    const employeePortalTab = event.target.closest("[data-employee-portal-view]");
+    if (employeePortalTab && state.role !== "manager") {
+      state.employeePortalView = employeePortalTab.dataset.employeePortalView;
+      renderEmployeePortal();
+      return;
+    }
+
+    if (event.target.closest("[data-new-chat]")) {
+      state.newChatOpen = true;
+      state.mobileMessagesThreadOpen = false;
+      renderMessages();
+      window.setTimeout(() => document.querySelector("#newChatForm")?.scrollIntoView({ behavior: "smooth", block: "start" }), 30);
+      return;
+    }
+
+    if (event.target.closest("[data-close-new-chat]")) {
+      state.newChatOpen = false;
+      renderMessages();
+      return;
+    }
+
+    if (event.target.closest("[data-chat-back]")) {
+      state.mobileMessagesThreadOpen = false;
+      renderMessages();
+      return;
+    }
+
+    const chatPersonButton = event.target.closest("[data-chat-person]");
+    if (chatPersonButton) {
+      openDirectChat(chatPersonButton.dataset.chatPerson);
+      return;
+    }
+
+    const chatThreadButton = event.target.closest("[data-chat-thread]");
+    if (chatThreadButton) {
+      state.activeChatThreadId = chatThreadButton.dataset.chatThread;
+      state.newChatOpen = false;
+      state.mobileMessagesThreadOpen = true;
+      renderMessages();
+      return;
+    }
+
+    const employeeScheduleWeekButton = event.target.closest("[data-employee-schedule-week]");
+    if (employeeScheduleWeekButton && state.role !== "manager") {
+      state.employeeScheduleWeekStart = employeeScheduleWeekButton.dataset.employeeScheduleWeek;
+      state.publishedSchedule = selectedEmployeeSchedule();
+      state.shiftChangeAssignmentId = "";
+      renderEmployeePortal();
+      return;
+    }
+
+    const openShiftChangeButton = event.target.closest("[data-open-shift-change]");
+    if (openShiftChangeButton && state.role !== "manager") {
+      state.shiftChangeAssignmentId = openShiftChangeButton.dataset.openShiftChange;
+      state.shiftChangeType = "cover";
+      renderEmployeePortal();
+      window.setTimeout(() => document.querySelector("#shiftChangePanel")?.scrollIntoView({ behavior: "smooth", block: "start" }), 40);
+      return;
+    }
+
+    if (event.target.closest("[data-close-shift-change]") && state.role !== "manager") {
+      state.shiftChangeAssignmentId = "";
+      state.shiftChangeType = "cover";
+      renderEmployeePortal();
+      return;
+    }
+
+    const coverOfferButton = event.target.closest("[data-offer-shift-cover]");
+    if (coverOfferButton && state.role !== "manager") {
+      offerShiftCover(coverOfferButton.dataset.offerShiftCover);
+      return;
+    }
+
+    const swapResponseButton = event.target.closest("[data-respond-swap][data-shift-request-id]");
+    if (swapResponseButton && state.role !== "manager") {
+      respondToShiftSwap(swapResponseButton.dataset.shiftRequestId, swapResponseButton.dataset.respondSwap);
+      return;
+    }
+
+    const shiftReviewButton = event.target.closest("[data-review-shift-change][data-shift-request-id]");
+    if (shiftReviewButton && state.role === "manager") {
+      reviewShiftChangeRequest(shiftReviewButton.dataset.shiftRequestId, shiftReviewButton.dataset.reviewShiftChange);
+      return;
+    }
+
+    const requestWeekButton = event.target.closest("[data-request-week]");
+    if (requestWeekButton && state.role !== "manager") {
+      state.requestCalendarWeekStart = requestWeekButton.dataset.requestWeek;
+      state.requestDraftWeekStart = "";
+      renderEmployeePortal();
+      return;
+    }
+
+    const requestDateButton = event.target.closest("[data-request-date]");
+    if (requestDateButton && state.role !== "manager") {
+      const requestDate = requestDateButton.dataset.requestDate;
+      if (!state.requestDraftDates[requestDate]) state.requestDraftDates[requestDate] = "ALL_DAY";
+      state.activeRequestDate = requestDate;
+      renderEmployeePortal();
+      return;
+    }
+
+    const requestScopeButton = event.target.closest("[data-request-scope]");
+    if (requestScopeButton && state.role !== "manager" && state.activeRequestDate) {
+      state.requestDraftDates[state.activeRequestDate] = requestScopeButton.dataset.requestScope;
+      renderEmployeePortal();
+      return;
+    }
+
+    const removeRequestDateButton = event.target.closest("[data-remove-request-date]");
+    if (removeRequestDateButton && state.role !== "manager") {
+      delete state.requestDraftDates[removeRequestDateButton.dataset.removeRequestDate];
+      state.activeRequestDate = Object.keys(state.requestDraftDates).sort()[0] || "";
+      renderEmployeePortal();
+      return;
+    }
+
     const emergencyContactButton = event.target.closest("[data-emergency-contact]");
     if (emergencyContactButton) {
       openEmergencyContactDialog(emergencyContactButton.dataset.emergencyContact);
@@ -3601,6 +5689,29 @@
       return;
     }
 
+    if (event.target.closest("[data-edit-priority]") && state.role === "manager") {
+      beginPriorityEdit();
+      return;
+    }
+
+    if (event.target.closest("[data-cancel-priority]") && state.role === "manager") {
+      cancelPriorityEdit();
+      return;
+    }
+
+    if (event.target.closest("[data-save-priority]") && state.role === "manager") {
+      saveSchedulingPolicy();
+      return;
+    }
+
+    if (event.target.closest("[data-open-availability-rules]") && state.role === "manager") {
+      state.scheduleModuleView = "availability";
+      renderAvailabilityMatrix();
+      renderScheduleModule();
+      window.setTimeout(() => document.querySelector(".availability-employee-editor")?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
+      return;
+    }
+
     const navButton = event.target.closest("[data-nav]");
     const scheduleViewButton = event.target.closest("[data-schedule-view]");
     if (scheduleViewButton && state.role === "manager") {
@@ -3613,6 +5724,28 @@
       renderScheduleModule();
       return;
     }
+    const viewScheduleRecordButton = event.target.closest("[data-view-schedule-record]");
+    if (viewScheduleRecordButton) {
+      state.selectedScheduleRecordId = viewScheduleRecordButton.dataset.viewScheduleRecord;
+      renderScheduleRecords();
+      window.setTimeout(() => document.querySelector("#selectedScheduleRecord")?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
+      return;
+    }
+    if (event.target.closest("[data-close-schedule-record]")) {
+      state.selectedScheduleRecordId = "";
+      renderScheduleRecords();
+      return;
+    }
+    const printScheduleRecordButton = event.target.closest("[data-print-schedule-record]");
+    if (printScheduleRecordButton) {
+      printScheduleRecord(printScheduleRecordButton.dataset.printScheduleRecord);
+      return;
+    }
+    const downloadScheduleRecordButton = event.target.closest("[data-download-schedule-record]");
+    if (downloadScheduleRecordButton) {
+      downloadScheduleRecord(downloadScheduleRecordButton.dataset.downloadScheduleRecord);
+      return;
+    }
     if (navButton) {
       if (state.role === "manager" && navButton.dataset.nav === "schedule") {
         state.scheduleModuleView = "availability";
@@ -3620,6 +5753,7 @@
         renderScheduleModule();
       }
       navigate(navButton.dataset.nav);
+      if (navButton.dataset.nav === "messages") renderMessages();
       if (state.role === "manager" && navButton.dataset.nav === "reports" && !state.reportData && !state.reportLoading) loadInventoryReport();
     }
 
@@ -3840,7 +5974,56 @@
     if (downloadButton) downloadSchedule(Number(downloadButton.dataset.downloadOption));
   });
 
-  document.addEventListener("change", (event) => {
+  document.addEventListener("pointerdown", (event) => {
+    const handle = event.target.closest("[data-priority-drag-handle]");
+    if (handle) startPriorityPointerDrag(event, handle);
+  });
+  document.addEventListener("pointermove", updatePriorityPointerDrag, { passive: false });
+  document.addEventListener("pointerup", (event) => {
+    if (priorityPointerDrag && event.pointerId === priorityPointerDrag.pointerId) finishPriorityPointerDrag(false);
+  });
+  document.addEventListener("pointercancel", (event) => {
+    if (priorityPointerDrag && event.pointerId === priorityPointerDrag.pointerId) finishPriorityPointerDrag(true);
+  });
+  document.addEventListener("keydown", (event) => {
+    const handle = event.target.closest("[data-priority-drag-handle][data-priority-code]");
+    if (!handle || !["ArrowUp", "ArrowDown"].includes(event.key)) return;
+    if (movePriorityCode(handle.dataset.priorityCode, event.key === "ArrowUp" ? -1 : 1)) event.preventDefault();
+  });
+
+  document.addEventListener("change", async (event) => {
+    if (event.target.matches('#shiftChangeForm input[name="shiftChangeType"]')) {
+      state.shiftChangeType = event.target.value;
+      const form = event.target.closest("#shiftChangeForm");
+      form.dataset.shiftChangeMode = state.shiftChangeType;
+      form.querySelectorAll(".shift-change-choice").forEach((choice) => choice.classList.toggle("active", choice.contains(event.target)));
+      const swapTarget = form.querySelector("[data-swap-target]");
+      const select = swapTarget?.querySelector("select");
+      if (swapTarget) swapTarget.hidden = state.shiftChangeType !== "swap";
+      if (select) select.disabled = state.shiftChangeType !== "swap";
+      const submit = form.querySelector('button[type="submit"]');
+      if (submit) submit.textContent = state.shiftChangeType === "call_off" ? "Send emergency alert" : "Send request";
+      const note = form.querySelector(".shift-change-submit-row p");
+      if (note) note.textContent = state.shiftChangeType === "call_off" ? "This sends an urgent in-app manager alert. Also call the store if the shift is soon." : "A manager must approve any final coverage or swap.";
+      return;
+    }
+    const policyCode = event.target.dataset.policyMin || event.target.dataset.policyMax || event.target.dataset.policyWeekdays || event.target.dataset.policyWeekend;
+    if (policyCode && state.role === "manager") {
+      const employee = state.team.find((item) => item.code === policyCode);
+      if (!employee) return;
+      if (event.target.matches("[data-policy-min]")) {
+        employee.minShifts = Number(event.target.value);
+        if (employee.maxShifts < employee.minShifts) employee.maxShifts = employee.minShifts;
+      }
+      if (event.target.matches("[data-policy-max]")) {
+        employee.maxShifts = Number(event.target.value);
+        if (employee.minShifts > employee.maxShifts) employee.minShifts = employee.maxShifts;
+      }
+      if (event.target.matches("[data-policy-weekdays]")) employee.weekdayRequirement = Number(event.target.value);
+      if (event.target.matches("[data-policy-weekend]")) employee.weekendRequired = event.target.checked;
+      renderAvailabilityMatrix();
+      return;
+    }
     if (event.target.matches("[data-mobile-availability-employee]")) {
       state.availabilityMobileEmployeeId = event.target.value;
       renderAvailabilityMatrix();
@@ -3855,10 +6038,12 @@
     }
     if (event.target.id === "weekStartInput") {
       state.settings.weekStart = event.target.value;
+      if (state.mode === "supabase" && state.role === "manager") await refreshWeeklyRequests();
       renderAvailabilityMatrix();
       renderRequests();
       renderScheduleModule();
     }
+    if (event.target.id === "dateRequestKind") state.dateRequestKind = event.target.value;
     if (event.target.id === "inventoryScanFile" && event.target.files?.[0]) chooseInventoryScanFile(event.target.files[0]);
     if (event.target.id === "productionScanFile" && event.target.files?.[0]) chooseProductionScanFile(event.target.files[0]);
     if (event.target.matches("[data-production-sheet-view]")) {
@@ -3901,21 +6086,16 @@
 
   document.addEventListener("input", (event) => {
     if (event.target.matches("[data-manual-sheet-date], [data-manual-sheet-cell], [data-opening-count]")) syncManualMasterInput(event.target);
-    if (event.target.matches("[data-availability-min], [data-availability-max], [data-availability-note]")) {
-      const employeeId = event.target.dataset.availabilityMin || event.target.dataset.availabilityMax || event.target.dataset.availabilityNote;
+    if (event.target.matches("[data-availability-note]")) {
+      const employeeId = event.target.dataset.availabilityNote;
       const employee = state.team.find((item) => item.id === employeeId);
       if (employee) {
-        if (event.target.matches("[data-availability-min]")) employee.minDays = Math.max(0, Math.min(6, Number(event.target.value) || 0));
-        if (event.target.matches("[data-availability-max]")) employee.maxDays = Math.max(0, Math.min(6, Number(event.target.value) || 0));
-        if (event.target.matches("[data-availability-note]")) employee.notes = event.target.value;
+        employee.notes = event.target.value;
       }
-    }
-    const requestForm = event.target.closest("#requestForm");
-    if (requestForm && (event.target.name === "minDays" || event.target.name === "maxDays")) {
-      renderAvailabilityPreview(requestForm);
     }
     if (event.target.matches("[data-scan-note]")) state.inventoryScanUserNote = event.target.value;
     if (event.target.matches("[data-production-note]")) state.productionScanUserNote = event.target.value;
+    if (event.target.id === "dateRequestNotes") state.dateRequestNotes = event.target.value;
     if (event.target.id === "inventoryFlavorSearch") {
       const query = event.target.value.trim().toLowerCase();
       document.querySelectorAll("[data-inventory-flavor-row]").forEach((row) => {
@@ -3928,6 +6108,16 @@
   });
 
   document.addEventListener("submit", (event) => {
+    if (event.target.id === "newChatForm") {
+      event.preventDefault();
+      createChat(event.target);
+      return;
+    }
+    if (event.target.id === "chatMessageForm") {
+      event.preventDefault();
+      sendChatMessage(event.target);
+      return;
+    }
     if (event.target.id === "reportRangeForm") {
       event.preventDefault();
       const formData = new FormData(event.target);
@@ -3945,6 +6135,14 @@
     if (event.target.id === "requestForm") {
       event.preventDefault();
       saveRequest(event.target);
+    }
+    if (event.target.id === "dateRequestForm") {
+      event.preventDefault();
+      saveDateRequests(event.target);
+    }
+    if (event.target.id === "shiftChangeForm") {
+      event.preventDefault();
+      submitShiftChangeRequest(event.target);
     }
     if (event.target.id === "employeeAccountForm") {
       event.preventDefault();

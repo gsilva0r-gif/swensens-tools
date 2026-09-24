@@ -1224,7 +1224,7 @@ textarea:focus-visible {
   inset: 0 0 auto;
   height: 64px;
   border-bottom: 3px solid var(--navy);
-  background: var(--berry) url("../swensens-bulbs.png") center / auto 60px repeat-x;
+  background: var(--berry) url("./swensens-bulbs.png") center / auto 60px repeat-x;
   content: "";
 }
 
@@ -1295,7 +1295,7 @@ textarea:focus-visible {
   z-index: 1;
   height: 15px;
   border-bottom: 2px solid var(--navy);
-  background: var(--berry) url("../swensens-bulbs.png") center / auto 37px repeat-x;
+  background: var(--berry) url("./swensens-bulbs.png") center / auto 37px repeat-x;
   content: "";
 }
 

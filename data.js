@@ -71,7 +71,7 @@
       skills: ["manager", "key_holder", "ic_maker", "trainer"], submitted: true,
       willingDouble: ["Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"],
       availability: availability(), maxWeekendDays: 1,
-      notes: "Hard rule: schedule no more than one weekend day.",
+      notes: "Hard rule: schedule no more than one Friday–Sunday weekend day.",
     },
     {
       id: "demo-juliette", code: "JULIETTE01", name: "Juliette", schedulePriority: 8, phone: "(415) 555-0108",
@@ -106,18 +106,18 @@
   ];
 
   const managerPolicies = {
-    PAUL01: { minShifts: 3, maxShifts: 5, weekdayRequirement: 2, weekendRequired: false },
-    CHERIE01: { minShifts: 3, maxShifts: 5, weekdayRequirement: 2, weekendRequired: false },
-    GABRIEL01: { minShifts: 3, maxShifts: 5, weekdayRequirement: 2, weekendRequired: false },
-    ISRAEL01: { minShifts: 3, maxShifts: 5, weekdayRequirement: 2, weekendRequired: false },
-    RORY01: { minShifts: 2, maxShifts: 4, weekdayRequirement: 2, weekendRequired: true },
-    EVELYN01: { minShifts: 2, maxShifts: 4, weekdayRequirement: 0, weekendRequired: true },
-    DANIA01: { minShifts: 2, maxShifts: 4, weekdayRequirement: 2, weekendRequired: true },
-    JULIETTE01: { minShifts: 1, maxShifts: 3, weekdayRequirement: 1, weekendRequired: true },
-    CHRISTOPHER01: { minShifts: 2, maxShifts: 4, weekdayRequirement: 2, weekendRequired: true },
-    ANDREW01: { minShifts: 1, maxShifts: 2, weekdayRequirement: 1, weekendRequired: true },
-    RYAN01: { minShifts: 2, maxShifts: 4, weekdayRequirement: 2, weekendRequired: true },
-    GIANNA01: { minShifts: 3, maxShifts: 4, weekdayRequirement: 2, weekendRequired: true },
+    PAUL01: { minShifts: 3, maxShifts: 5, weekdayRequirement: 2, weekendDaysRequired: 0 },
+    CHERIE01: { minShifts: 3, maxShifts: 5, weekdayRequirement: 2, weekendDaysRequired: 0 },
+    GABRIEL01: { minShifts: 3, maxShifts: 5, weekdayRequirement: 2, weekendDaysRequired: 0 },
+    ISRAEL01: { minShifts: 3, maxShifts: 5, weekdayRequirement: 2, weekendDaysRequired: 0 },
+    RORY01: { minShifts: 2, maxShifts: 4, weekdayRequirement: 1, weekendDaysRequired: 1 },
+    EVELYN01: { minShifts: 2, maxShifts: 4, weekdayRequirement: 0, weekendDaysRequired: 1 },
+    DANIA01: { minShifts: 2, maxShifts: 4, weekdayRequirement: 2, weekendDaysRequired: 1 },
+    JULIETTE01: { minShifts: 1, maxShifts: 3, weekdayRequirement: 1, weekendDaysRequired: 1 },
+    CHRISTOPHER01: { minShifts: 2, maxShifts: 4, weekdayRequirement: 2, weekendDaysRequired: 1 },
+    ANDREW01: { minShifts: 1, maxShifts: 2, weekdayRequirement: 1, weekendDaysRequired: 1 },
+    RYAN01: { minShifts: 2, maxShifts: 4, weekdayRequirement: 2, weekendDaysRequired: 1 },
+    GIANNA01: { minShifts: 3, maxShifts: 4, weekdayRequirement: 2, weekendDaysRequired: 1 },
   };
 
   team.forEach((employee) => {
@@ -125,7 +125,7 @@
       minShifts: 2,
       maxShifts: 4,
       weekdayRequirement: 2,
-      weekendRequired: employee.schedulePriority >= 9,
+      weekendDaysRequired: employee.schedulePriority >= 9 ? 1 : 0,
     }, managerPolicies[employee.code] || {});
   });
 

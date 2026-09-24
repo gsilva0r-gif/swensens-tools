@@ -6,7 +6,7 @@
     <meta name="theme-color" content="#B5222B" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-title" content="Swensen's Hub" />
-    <meta name="description" content="Scheduling, requests, training, IC production, and inventory tools for Swensen's management." />
+    <meta name="description" content="Demand forecasting, seasonal planning, scheduling, and inventory tools for Swensen's management." />
     <meta property="og:title" content="Swensen's Management Hub" />
     <meta property="og:description" content="Schedules, requests, IC production, and inventory in one mobile-friendly hub." />
     <meta property="og:image" content="https://gsilva0r-gif.github.io/swensens-tools/swensens-brand-logo.png" />
@@ -19,12 +19,30 @@
     <link rel="apple-touch-icon" sizes="180x180" href="./apple-touch-icon.png" />
     <link rel="manifest" href="./manifest.webmanifest" />
     <link rel="stylesheet" href="./styles.css?v=messages-inbox-v3" />
+    <link rel="stylesheet" href="./v16.css?v=planning-home-v17" />
   </head>
   <body>
     <div class="stripe" aria-hidden="true"></div>
 
     <main id="loginView" class="login-shell">
+      <section class="login-intro" aria-label="Swensen's staff workspace">
+        <div class="login-intro-brand">
+          <img src="./swensens-brand-logo.png" alt="" />
+          <span>Hyde &amp; Union · Since 1948</span>
+        </div>
+        <div class="login-intro-copy">
+          <p class="login-intro-kicker">Swensen's Management Hub</p>
+          <h2>Run today.<br />Plan next week.</h2>
+          <p>Schedules, staff requests, messages, production, and inventory—together in one calm workspace.</p>
+        </div>
+        <div class="login-intro-foot">
+          <span><b>01</b> Schedule</span>
+          <span><b>02</b> Communicate</span>
+          <span><b>03</b> Track</span>
+        </div>
+      </section>
       <section class="login-card" aria-labelledby="loginTitle">
+        <p class="login-access-label">Staff access</p>
         <div class="login-brand">
           <img class="login-logo" src="./swensens-brand-logo.png" alt="Swensen's Ice Cream and Sundaes since 1948" />
           <div class="login-brand-copy">
@@ -65,6 +83,10 @@
             <span class="brand-small">Hyde &amp; Union</span>
           </span>
         </button>
+        <div class="header-context" aria-hidden="true">
+          <span>Store workspace</span>
+          <strong>San Francisco</strong>
+        </div>
         <div class="header-actions">
           <span id="roleBadge" class="role-badge">Manager</span>
           <button id="logoutButton" class="avatar-button" type="button" aria-label="Sign out">GM</button>
@@ -73,63 +95,123 @@
 
       <div class="desktop-layout">
         <aside class="side-nav" aria-label="Primary navigation">
-          <button class="nav-item active manager-only-nav" data-nav="home"><span>⌂</span>Home</button>
-          <button class="nav-item" data-nav="schedule"><span>▦</span>Schedule</button>
-          <button class="nav-item" data-nav="messages"><span>◉</span>Messages</button>
-          <button class="nav-item" data-nav="inventory"><span>◫</span>Inventory</button>
-          <button class="nav-item manager-only-nav" data-nav="reports"><span>▥</span>Reports</button>
+          <p class="side-nav-label">Workspace</p>
+          <button class="nav-item active manager-only-nav" data-nav="home"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 11.5 12 4l9 7.5"/><path d="M5.5 10.5V20h13v-9.5"/><path d="M9.5 20v-6h5v6"/></svg></span><span class="nav-copy"><strong>Home</strong><small>Planning</small></span></button>
+          <button class="nav-item" data-nav="schedule"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="15" rx="2"/><path d="M8 3v4M16 3v4M3.5 9.5h17"/><path d="M8 13h.01M12 13h.01M16 13h.01M8 16.5h.01M12 16.5h.01"/></svg></span><span class="nav-copy"><strong>Schedule</strong><small>Plan the week</small></span></button>
+          <button class="nav-item" data-nav="messages"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M20 15a3 3 0 0 1-3 3H9l-5 3v-6a3 3 0 0 1-1-2.2V7a3 3 0 0 1 3-3h11a3 3 0 0 1 3 3z"/><path d="M8 9h8M8 13h5"/></svg></span><span class="nav-copy"><strong>Messages</strong><small>Talk with staff</small></span></button>
+          <button class="nav-item" data-nav="inventory"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 7.5 12 3l8 4.5v9L12 21l-8-4.5z"/><path d="m4 7.5 8 4.5 8-4.5M12 12v9"/></svg></span><span class="nav-copy"><strong>Inventory</strong><small>Cans &amp; ½ gallons</small></span></button>
+          <button class="nav-item manager-only-nav" data-nav="records"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 4h14v16H5z"/><path d="M8 8h8M8 12h8M8 16h5"/></svg></span><span class="nav-copy"><strong>Records</strong><small>Schedules &amp; sheets</small></span></button>
+          <button class="nav-item manager-only-nav" data-nav="reports"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 20V10M12 20V4M19 20v-7"/><path d="M3 20h18"/></svg></span><span class="nav-copy"><strong>Reports</strong><small>Production &amp; usage</small></span></button>
+          <div class="side-nav-foot"><span class="side-nav-status" aria-hidden="true"></span><div><strong>Store tools</strong><small>Private staff workspace</small></div></div>
         </aside>
 
         <main class="workspace">
           <section id="page-home" class="page active-page">
-            <div class="welcome-row">
+            <div class="planning-title-row">
               <div>
                 <p id="todayLabel" class="eyebrow"></p>
-                <h2>Hi, <span id="displayName">Manager</span>.</h2>
-                <p>What would you like to work on?</p>
+                <h2>Plan next week with confidence</h2>
+                <p>Demand, seasonal launches, weather, and city activity—together in one view for <span id="displayName">Manager</span>.</p>
               </div>
-              <button class="primary-button compact" data-nav="schedule">Build schedule</button>
+              <div class="planning-window" aria-label="Forecast planning window">
+                <span>Planning window</span>
+                <strong id="planningWeekLabel">Next Tuesday–Sunday</strong>
+                <small id="forecastFreshness"><i aria-hidden="true"></i> Forecast preview</small>
+              </div>
             </div>
 
-            <div class="status-grid">
-              <article class="status-card mint">
-                <span class="card-kicker">Requests</span>
-                <strong id="requestMetric">12 of 14</strong>
-                <p>Submitted</p>
-                <span class="status-pill good">On track</span>
-              </article>
-              <article class="status-card berry">
-                <span class="card-kicker">IC production</span>
-                <strong id="icMetric">3 days</strong>
-                <p>This week</p>
-                <span class="status-pill">Flexible</span>
-              </article>
-              <article class="status-card vanilla">
-                <span class="card-kicker">Training</span>
-                <strong id="trainingMetric">Andrew</strong>
-                <p>Trainee</p>
-                <span class="status-pill warn">Needs pairing</span>
-              </article>
-            </div>
-
-            <section class="panel attention-panel">
-              <div class="panel-heading">
-                <div>
-                  <p class="eyebrow">Next</p>
-                  <h3>Needs attention</h3>
+            <details class="forecast-preview-drawer">
+              <summary>
+                <span><small>Live demand forecast</small><strong>Still working · coming soon</strong></span>
+                <span class="forecast-preview-action">Open preview <i aria-hidden="true">⌄</i></span>
+              </summary>
+              <section class="planning-hero-grid" aria-label="Next-week demand forecast">
+              <article class="panel demand-forecast-card">
+                <div class="planning-card-heading">
+                  <div><p class="eyebrow">Next-week outlook</p><h3>Expected store demand</h3></div>
+                  <span id="forecastLevelBadge" class="forecast-level-badge">Busy</span>
                 </div>
-                <span class="count-badge">2 open</span>
-              </div>
-              <button class="attention-row" data-nav="schedule" data-schedule-view="requests">
-                <span class="attention-icon">!</span>
-                <span><strong>Review 2 requests</strong><small>Open employee requests</small></span>
-                <span aria-hidden="true">›</span>
-              </button>
-              <button class="attention-row" data-nav="schedule">
-                <span class="attention-icon cream">IC</span>
-                <span><strong>Set IC production days</strong><small>Choose 2, 3, or 4 days</small></span>
-                <span aria-hidden="true">›</span>
-              </button>
+                <div class="forecast-summary-row">
+                  <div class="forecast-score-wrap">
+                    <span class="forecast-score"><strong id="forecastScore">74</strong><small>/100</small></span>
+                    <span id="forecastChange" class="forecast-change">↑ 16% vs. recent baseline</span>
+                  </div>
+                  <p id="forecastNarrative">Plan for a stronger Friday–Sunday, with the highest pressure on Saturday afternoon.</p>
+                </div>
+                <div class="trend-chart-heading">
+                  <div><strong>Store activity trend</strong><span>Recorded cans + ½-gallon pulls</span></div>
+                  <div class="trend-legend" aria-label="Chart legend"><span class="cans">Cans</span><span class="halves">½ gallons</span></div>
+                </div>
+                <div id="demandTrendChart" class="demand-trend-chart" role="img" aria-label="Eight-week inventory usage trend"></div>
+                <div class="daily-forecast-heading"><strong>Day-by-day projection</strong><span id="forecastConfidence">Medium confidence</span></div>
+                <div id="dailyForecastStrip" class="daily-forecast-strip"></div>
+              </article>
+
+              <aside class="panel forecast-drivers-card">
+                <div class="planning-card-heading">
+                  <div><p class="eyebrow">Why this forecast</p><h3>Demand signals</h3></div>
+                  <span class="model-badge">Model v1</span>
+                </div>
+                <div id="forecastDrivers" class="forecast-driver-list"></div>
+                <div class="source-readiness">
+                  <div class="source-readiness-heading"><strong>Data readiness</strong><span>2 of 4 live</span></div>
+                  <div class="source-row connected"><i aria-hidden="true"></i><span><strong>Inventory history</strong><small>Used cans &amp; refill logs</small></span><b>Connected</b></div>
+                  <div id="weatherSourceStatus" class="source-row loading"><i aria-hidden="true"></i><span><strong>SF weather</strong><small>Daily temperature &amp; rain</small></span><b>Loading</b></div>
+                  <div class="source-row pending"><i aria-hidden="true"></i><span><strong>SF major events</strong><small>Calendar feed needed</small></span><b>Planned</b></div>
+                  <div class="source-row pending"><i aria-hidden="true"></i><span><strong>DoorDash + Uber Eats</strong><small>Orders/report access needed</small></span><b>Planned</b></div>
+                </div>
+                <p class="model-note">Container usage is a useful demand proxy, not a customer count. Sales and delivery orders will make the projection sharper.</p>
+              </aside>
+              </section>
+            </details>
+
+            <section class="planning-middle-grid">
+              <article class="panel planning-board-panel">
+                <div class="planning-card-heading">
+                  <div><p class="eyebrow">Work board</p><h3>What needs to happen</h3></div>
+                  <span id="planningTaskCount" class="count-badge">3 items</span>
+                </div>
+                <div id="planningTaskBoard" class="planning-task-board"></div>
+              </article>
+
+              <article class="panel seasonal-board-panel">
+                <div class="planning-card-heading seasonal-heading">
+                  <div><p class="eyebrow">Annual launch calendar</p><h3>Seasonal readiness</h3></div>
+                  <span class="sheet-reference">From your 2023 flavor sheet</span>
+                </div>
+                <div id="seasonalLaunchBoard" class="seasonal-launch-board"></div>
+                <p class="seasonal-footnote">Prep dates are a five-day planning recommendation. Release dates and historical quantities come from the attached sheet.</p>
+              </article>
+            </section>
+
+            <section class="planning-lower-grid">
+              <article class="panel weather-events-panel">
+                <div class="planning-card-heading">
+                  <div><p class="eyebrow">Outside signals</p><h3>Weather &amp; SF events</h3></div>
+                  <span id="weatherBoardStatus" class="live-source-badge">Loading weather</span>
+                </div>
+                <div id="weatherForecastBoard" class="weather-forecast-board" aria-live="polite"></div>
+                <div class="event-watch-card">
+                  <span class="event-watch-icon" aria-hidden="true">SF</span>
+                  <div><strong>Major-event feed is the next connection</strong><p>Concerts, conventions, festivals, games, holidays, and neighborhood closures can add or reduce demand.</p></div>
+                  <span class="event-status">Not scored yet</span>
+                </div>
+              </article>
+
+              <article class="panel schedule-recommendation-panel">
+                <div class="planning-card-heading">
+                  <div><p class="eyebrow">Forecast → schedule</p><h3>Recommended settings</h3></div>
+                  <span class="recommendation-badge">Draft</span>
+                </div>
+                <p class="recommendation-intro">These are the settings the Schedule builder should start with—not another shortcut to the same screen.</p>
+                <div id="scheduleRecommendation" class="schedule-recommendation"></div>
+                <div class="settings-summary">
+                  <div><span>IC target</span><strong>3 days</strong><small>Tue · Thu · Sat</small></div>
+                  <div><span>Consecutive IC</span><strong>Off</strong><small>One-day gap kept</small></div>
+                  <div><span>Training</span><strong>Earlier week</strong><small>Avoid Saturday peak</small></div>
+                </div>
+                <p class="recommendation-note">Saturday’s AM target includes one extra IC maker. Confirm employee availability before applying these settings.</p>
+              </article>
             </section>
 
             <section id="databaseHealthPanel" class="panel system-check-panel" hidden>
@@ -199,7 +281,6 @@
               <button class="schedule-module-tab active" type="button" role="tab" data-schedule-view="availability">Availability</button>
               <button class="schedule-module-tab" type="button" role="tab" data-schedule-view="priority">Priority</button>
               <button class="schedule-module-tab" type="button" role="tab" data-schedule-view="builder">Build</button>
-              <button class="schedule-module-tab" type="button" role="tab" data-schedule-view="records">Records</button>
             </div>
             <section id="scheduleBuilderModule" class="schedule-module-panel" hidden>
               <div id="scheduleSettings" class="settings-grid"></div>
@@ -218,11 +299,7 @@
               </details>
             </section>
             <section id="schedulePriorityModule" class="schedule-module-panel" hidden>
-              <div class="schedule-module-heading"><div><h3>Scheduling priority</h3><p>Set who receives preference first when qualified employees want the same shift.</p></div></div>
               <div id="schedulingPriorityContent"></div>
-            </section>
-            <section id="scheduleRecordsModule" class="schedule-module-panel" hidden>
-              <div id="scheduleRecordsContent"></div>
             </section>
             <section id="employeeScheduleWorkspace" hidden>
               <div class="page-title-row"><div><p id="requestPageEyebrow" class="eyebrow">Employee portal</p><h2 id="requestPageTitle">My schedule & request</h2><p id="requestPageCopy">See your assigned shifts and update your weekly availability.</p></div></div>
@@ -239,8 +316,13 @@
           </section>
 
           <section id="page-inventory" class="page">
-            <div class="page-title-row"><div><p class="eyebrow">IC tools</p><h2>Inventory</h2><p>Master cans, ½ gallons, production, and records.</p></div></div>
+            <div class="page-title-row"><div><p class="eyebrow">IC tools</p><h2>Inventory</h2><p>Master cans, ½ gallons, and production.</p></div></div>
             <div id="inventoryContent" aria-live="polite"></div>
+          </section>
+
+          <section id="page-records" class="page">
+            <div class="page-title-row"><div><p class="eyebrow">Permanent business history</p><h2>Records</h2><p>Published schedules and production master sheets stay together here.</p></div></div>
+            <div id="recordsContent" aria-live="polite"></div>
           </section>
 
           <section id="page-reports" class="page">
@@ -251,11 +333,12 @@
       </div>
 
       <nav class="bottom-nav" aria-label="Mobile navigation">
-        <button class="nav-item active manager-only-nav" data-nav="home"><span>⌂</span>Home</button>
-        <button class="nav-item" data-nav="schedule"><span>▦</span>Schedule</button>
-        <button class="nav-item" data-nav="messages"><span>◉</span>Messages</button>
-        <button class="nav-item" data-nav="inventory"><span>◫</span>Inventory</button>
-        <button class="nav-item manager-only-nav" data-nav="reports"><span>▥</span>Reports</button>
+        <button class="nav-item active manager-only-nav" data-nav="home"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 11.5 12 4l9 7.5"/><path d="M5.5 10.5V20h13v-9.5"/><path d="M9.5 20v-6h5v6"/></svg></span>Home</button>
+        <button class="nav-item" data-nav="schedule"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="15" rx="2"/><path d="M8 3v4M16 3v4M3.5 9.5h17"/></svg></span>Schedule</button>
+        <button class="nav-item" data-nav="messages"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M20 15a3 3 0 0 1-3 3H9l-5 3v-6a3 3 0 0 1-1-2.2V7a3 3 0 0 1 3-3h11a3 3 0 0 1 3 3z"/><path d="M8 9h8M8 13h5"/></svg></span>Messages</button>
+        <button class="nav-item" data-nav="inventory"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 7.5 12 3l8 4.5v9L12 21l-8-4.5z"/><path d="m4 7.5 8 4.5 8-4.5M12 12v9"/></svg></span>Inventory</button>
+        <button class="nav-item manager-only-nav" data-nav="records"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 4h14v16H5z"/><path d="M8 8h8M8 12h8M8 16h5"/></svg></span>Records</button>
+        <button class="nav-item manager-only-nav" data-nav="reports"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 20V10M12 20V4M19 20v-7"/><path d="M3 20h18"/></svg></span>Reports</button>
       </nav>
     </div>
 
@@ -280,8 +363,8 @@
     <div id="printScheduleRoot" aria-hidden="true"></div>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="./config.js"></script>
-    <script src="./data.js?v=messages-inbox-v3"></script>
-    <script src="./scheduler.js?v=messages-inbox-v3"></script>
-    <script src="./app.js?v=messages-inbox-v3"></script>
+    <script src="./data.js?v=two-week-records-v19"></script>
+    <script src="./scheduler.js?v=two-week-records-v19"></script>
+    <script src="./app.js?v=two-week-records-v19"></script>
   </body>
 </html>

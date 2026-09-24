@@ -53,7 +53,10 @@
       skills: [...employee.skills],
       minShifts: Math.max(0, Math.min(6, Number(employee.minShifts) || 0)),
       maxShifts: Math.max(1, Math.min(6, Number(employee.maxShifts) || 6)),
-      weekdayRequirement: Math.max(0, Math.min(4, Number(employee.weekdayRequirement) || 0)),
+      weekdayRequirement: Math.max(0, Math.min(3, Number(employee.weekdayRequirement) || 0)),
+      weekendDaysRequired: Math.max(0, Math.min(2, Number.isFinite(Number(employee.weekendDaysRequired))
+        ? Number(employee.weekendDaysRequired)
+        : employee.weekendRequired ? 1 : 0)),
       credits: 0,
       estimatedHours: 0,
       dayCount: {},
@@ -80,8 +83,8 @@
       const businessDayCap = Number.isFinite(employee.businessDayCap) ? employee.businessDayCap : days.length;
       const managerDayCap = Number.isFinite(employee.maxShifts) ? employee.maxShifts : days.length;
       if (employee.daysWorked.size >= Math.min(businessDayCap, managerDayCap)) return false;
-      if ((day === "Saturday" || day === "Sunday") && Number.isFinite(employee.maxWeekendDays)) {
-        const weekendDaysWorked = ["Saturday", "Sunday"].filter((weekendDay) => employee.daysWorked.has(weekendDay)).length;
+      if (["Friday", "Saturday", "Sunday"].includes(day) && Number.isFinite(employee.maxWeekendDays)) {
+        const weekendDaysWorked = ["Friday", "Saturday", "Sunday"].filter((weekendDay) => employee.daysWorked.has(weekendDay)).length;
         if (weekendDaysWorked >= employee.maxWeekendDays) return false;
       }
       return true;
@@ -350,15 +353,15 @@
       if (employee.submitted === false) {
         addWarning("request", `${employee.name} has not submitted this week's request.`, "info");
       }
-      if (employee.weekendRequired) {
-        const weekendAvailable = ["Saturday", "Sunday"].some((day) =>
+      if (employee.weekendDaysRequired) {
+        const weekendDaysOffered = ["Friday", "Saturday", "Sunday"].filter((day) =>
           canWork(employee, day, "AM") || canWork(employee, day, "PM")
-        );
-        if (!weekendAvailable) {
-          addWarning("weekend", `${employee.name} is in the weekend-required priority group but did not offer Saturday or Sunday.`, "critical");
+        ).length;
+        if (weekendDaysOffered < employee.weekendDaysRequired) {
+          addWarning("weekend", `${employee.name} must offer ${employee.weekendDaysRequired}/3 weekend days (Friday–Sunday), but offered ${weekendDaysOffered}/3.`, "critical");
         }
       }
-      const weekdaysOffered = ["Tuesday", "Wednesday", "Thursday", "Friday"].filter((day) =>
+      const weekdaysOffered = ["Tuesday", "Wednesday", "Thursday"].filter((day) =>
         canWork(employee, day, "AM") || canWork(employee, day, "PM")
       ).length;
       if (weekdaysOffered < employee.weekdayRequirement) {

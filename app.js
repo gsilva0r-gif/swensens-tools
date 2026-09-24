@@ -30,8 +30,6 @@
     scheduleAvailabilityModule: document.querySelector("#scheduleAvailabilityModule"),
     schedulePriorityModule: document.querySelector("#schedulePriorityModule"),
     schedulingPriorityContent: document.querySelector("#schedulingPriorityContent"),
-    scheduleRecordsModule: document.querySelector("#scheduleRecordsModule"),
-    scheduleRecordsContent: document.querySelector("#scheduleRecordsContent"),
     scheduleRequestsModule: document.querySelector("#scheduleRequestsModule"),
     scheduleManagerHeading: document.querySelector("#scheduleManagerHeading"),
     scheduleModuleTabs: document.querySelector(".schedule-module-tabs"),
@@ -43,6 +41,7 @@
     databaseHealthAreas: document.querySelector("#databaseHealthAreas"),
     runDatabaseHealthCheck: document.querySelector("#runDatabaseHealthCheck"),
     inventory: document.querySelector("#inventoryContent"),
+    records: document.querySelector("#recordsContent"),
     reports: document.querySelector("#reportsContent"),
     messages: document.querySelector("#messagesContent"),
     emergencyContactDialog: document.querySelector("#emergencyContactDialog"),
@@ -93,9 +92,11 @@
     newChatOpen: false,
     messagesSetupMissing: false,
     messageBusy: false,
+    chatRefreshBusy: false,
     directChatOpeningId: "",
     mobileMessagesThreadOpen: false,
     chatRefreshDebounce: null,
+    chatRefreshTimer: null,
     editingEmployeeId: null,
     editingSkillsEmployeeId: null,
     showingEmployeeAccountForm: false,
@@ -113,6 +114,8 @@
     requestRefreshTimer: null,
     requestRefreshDebounce: null,
     shiftChangeRefreshDebounce: null,
+    inventoryRefreshDebounce: null,
+    inventoryRefreshTimer: null,
     profileSkills: [],
     canAccessInventory: false,
     inventoryFlavors: [],
@@ -122,6 +125,7 @@
     productionSheetViewId: "",
     inventoryLoading: false,
     inventoryBusy: false,
+    inventoryRefreshBusy: false,
     inventoryError: "",
     inventoryEntryMode: "production",
     inventoryMasterView: "can",
@@ -153,9 +157,13 @@
     isItPreview: false,
     emergencyContacts: {},
     emergencyContactEmployeeId: "",
+    planningWeather: [],
+    planningWeatherStatus: "idle",
+    planningWeatherError: "",
   };
 
   let priorityPointerDrag = null;
+  let priorityPointerPress = null;
 
   const seniorityCodes = [
     "PAUL01",
@@ -195,10 +203,14 @@
       employee.schedulePriority = rankByCode.get(employee.code) || Number(employee.schedulePriority) || state.team.length;
       employee.minShifts = Math.max(0, Math.min(6, Number(employee.minShifts) || 0));
       employee.maxShifts = Math.max(employee.minShifts, Math.min(6, Number(employee.maxShifts) || 6));
-      employee.weekdayRequirement = Math.max(0, Math.min(4, Number(employee.weekdayRequirement) || 0));
-      if (typeof employee.weekendRequired !== "boolean") {
-        employee.weekendRequired = employee.schedulePriority >= (Number(state.settings.weekendPriorityStart) || 9);
-      }
+      employee.weekdayRequirement = Math.max(0, Math.min(3, Number(employee.weekdayRequirement) || 0));
+      const legacyWeekendRequirement = typeof employee.weekendRequired === "boolean"
+        ? (employee.weekendRequired ? 1 : 0)
+        : employee.schedulePriority >= (Number(state.settings.weekendPriorityStart) || 9) ? 1 : 0;
+      employee.weekendDaysRequired = Math.max(0, Math.min(2, Number.isFinite(Number(employee.weekendDaysRequired))
+        ? Number(employee.weekendDaysRequired)
+        : legacyWeekendRequirement));
+      employee.weekendRequired = employee.weekendDaysRequired > 0;
     });
   }
 
@@ -207,15 +219,8 @@
     return [...state.team].sort((a, b) => a.schedulePriority - b.schedulePriority || a.name.localeCompare(b.name));
   }
 
-  function employeeOffersWeekend(employee) {
-    return ["Saturday", "Sunday"].some((day) =>
-      (employee.availability?.[day]?.AM || "available") !== "unavailable" ||
-      (employee.availability?.[day]?.PM || "available") !== "unavailable"
-    );
-  }
-
-  function employeeOfferedWeekdays(employee) {
-    return ["Tuesday", "Wednesday", "Thursday", "Friday"].filter((day) =>
+  function employeeWeekendDaysOffered(employee) {
+    return ["Friday", "Saturday", "Sunday"].filter((day) =>
       (employee.availability?.[day]?.AM || "available") !== "unavailable" ||
       (employee.availability?.[day]?.PM || "available") !== "unavailable"
     ).length;
@@ -354,6 +359,50 @@
     seasonals: "Seasonals",
   };
 
+  const seasonalLaunches = [
+    {
+      id: "summer",
+      season: "Summer",
+      month: 5,
+      day: 1,
+      flavors: ["Peach", "Coconut", "Lemon B.P."],
+      history: "2023: Peach 73 cans · 72 half-gallons · 27 batches; Coconut 30 · 24 · 10.5.",
+    },
+    {
+      id: "fall",
+      season: "Fall",
+      month: 10,
+      day: 1,
+      flavors: ["Pumpkin", "Black Licorice"],
+      history: "2023: Pumpkin 30 cans · 32 half-gallons · 11 batches; Licorice 6 · 10 · 2.",
+    },
+    {
+      id: "winter",
+      season: "Winter",
+      month: 11,
+      day: 1,
+      flavors: ["Eggnog Ice Cream", "Rum Raisin", "Spumoni"],
+      history: "2023: Eggnog 33 cans; Rum Raisin 18; Spumoni 21. Thirteen, eight, and twelve batches.",
+    },
+    {
+      id: "drink",
+      season: "Winter drink",
+      month: 11,
+      day: 15,
+      flavors: ["Eggnog Drink"],
+      history: "2023 sheet reference: 8.5 batches; five gallons makes five batches.",
+    },
+  ];
+
+  const planningStaffing = [
+    { day: "Tue", am: 2, pm: 3, score: 59 },
+    { day: "Wed", am: 2, pm: 3, score: 63 },
+    { day: "Thu", am: 3, pm: 3, score: 70 },
+    { day: "Fri", am: 3, pm: 4, score: 81 },
+    { day: "Sat", am: 4, pm: 4, score: 91 },
+    { day: "Sun", am: 3, pm: 4, score: 78 },
+  ];
+
   function loadInventoryPreviewData() {
     const previewFlavors = [
       ["vanilla", "Vanilla", "vanillas", 24, 6, true],
@@ -400,16 +449,57 @@
     }));
     state.inventoryCatalog = previewFlavors;
     state.inventoryFlavors = previewFlavors;
-    state.productionSheets = [{
-      id: "preview-sheet-1",
-      sheet_number: 7,
-      status: "active",
-      started_on: "2026-09-01",
-      completed_at: null,
-      completed_by_name: null,
-      inventory_snapshot: null,
-      slots,
-    }];
+    const previewSnapshot = previewFlavors.map((flavor) => ({
+      flavor_id: flavor.id,
+      name: flavor.name,
+      category: flavor.category,
+      sort_order: flavor.sort_order,
+      tracks_half_gallons: flavor.tracksHalfGallons,
+      can_count: flavor.canCount,
+      half_gallon_count: flavor.halfGallonCount,
+    }));
+    const archivedSlots = (dates, variation) => dates.map((date, slotIndex) => ({
+      slot_number: slotIndex + 1,
+      can_date: date,
+      half_gallon_date: date,
+      cells: previewFlavors.map((flavor, flavorIndex) => ({
+        flavor_id: flavor.id,
+        can_quantity: (flavorIndex + slotIndex + variation) % 5 === 0 ? (flavorIndex % 3) + 1 : 0,
+        half_gallon_quantity: flavor.tracksHalfGallons && (flavorIndex + slotIndex + variation) % 7 === 0 ? 1 : 0,
+      })),
+    }));
+    state.productionSheets = [
+      {
+        id: "preview-sheet-1",
+        sheet_number: 7,
+        status: "active",
+        started_on: "2026-09-01",
+        completed_at: null,
+        completed_by_name: null,
+        inventory_snapshot: null,
+        slots,
+      },
+      {
+        id: "preview-sheet-archive-6",
+        sheet_number: 6,
+        status: "complete",
+        started_on: "2026-08-17",
+        completed_at: "2026-08-28T20:15:00.000Z",
+        completed_by_name: "Gabriel",
+        inventory_snapshot: previewSnapshot,
+        slots: archivedSlots(["2026-08-18", "2026-08-20", "2026-08-22", "2026-08-25", "2026-08-27"], 1),
+      },
+      {
+        id: "preview-sheet-archive-5",
+        sheet_number: 5,
+        status: "complete",
+        started_on: "2026-08-03",
+        completed_at: "2026-08-14T19:40:00.000Z",
+        completed_by_name: "Israel",
+        inventory_snapshot: previewSnapshot,
+        slots: archivedSlots(["2026-08-04", "2026-08-06", "2026-08-08", "2026-08-11", "2026-08-13"], 3),
+      },
+    ];
     state.productionSheetViewId = "preview-sheet-1";
     state.inventoryHistory = [
       {
@@ -458,7 +548,7 @@
   const demoDateRequestsStorageKey = "swensens-demo-date-requests-v1";
   const demoShiftChangeStorageKey = "swensens-demo-shift-changes-v2";
   const demoMessagesStorageKey = "swensens-demo-messages-v1";
-  const emergencyContactsStorageKey = "swensens-emergency-contacts-device-v1";
+  const emergencyContactsStorageKey = "swensens-emergency-contacts-preview-v1";
 
   function loadDemoTeam() {
     try {
@@ -622,7 +712,7 @@
     try {
       window.localStorage.setItem(emergencyContactsStorageKey, JSON.stringify(state.emergencyContacts));
     } catch (_) {
-      showToast("This browser could not save the emergency contact.");
+      showToast("This browser could not save the preview contact.");
     }
   }
 
@@ -690,7 +780,7 @@
     saveEmergencyContacts();
     renderTeam();
     closeEmergencyContactDialog();
-    showToast(`${employee.name}'s emergency contact was removed.`);
+    showToast(`${employee.name}'s preview contact was removed.`);
   }
 
   function escapeHtml(value) {
@@ -1228,6 +1318,9 @@
     state.systemCheckBusy = false;
     state.latestSystemCheck = null;
     state.isItPreview = false;
+    state.planningWeather = [];
+    state.planningWeatherStatus = "idle";
+    state.planningWeatherError = "";
     elements.databaseHealthPanel.hidden = true;
     elements.appView.classList.remove("employee-mode");
     elements.appView.classList.remove("inventory-staff-mode");
@@ -1280,31 +1373,375 @@
     renderScheduleModule();
     renderScheduleResults();
     renderInventory();
+    renderRecords();
     renderReports();
     renderMessages();
   }
 
+  function nextPlanningTuesday(value = new Date()) {
+    const date = value instanceof Date ? new Date(value) : new Date(`${value}T12:00:00`);
+    date.setHours(12, 0, 0, 0);
+    let daysAhead = (2 - date.getDay() + 7) % 7;
+    if (daysAhead === 0) daysAhead = 7;
+    date.setDate(date.getDate() + daysAhead);
+    return date;
+  }
+
+  function planningDateRange() {
+    const start = nextPlanningTuesday();
+    const end = new Date(start);
+    end.setDate(end.getDate() + 5);
+    const startLabel = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" }).format(start);
+    const endLabel = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" }).format(end);
+    return { start, end, label: `${startLabel}–${endLabel}` };
+  }
+
+  function dateDifferenceInDays(later, earlier = new Date()) {
+    const end = new Date(later);
+    const start = new Date(earlier);
+    end.setHours(12, 0, 0, 0);
+    start.setHours(12, 0, 0, 0);
+    return Math.round((end.getTime() - start.getTime()) / 86400000);
+  }
+
+  function planningTrendData() {
+    const planningStart = nextPlanningTuesday();
+    const finalSunday = new Date(planningStart);
+    finalSunday.setDate(finalSunday.getDate() - 2);
+    const weeks = Array.from({ length: 8 }, (_, index) => {
+      const start = new Date(finalSunday);
+      start.setDate(start.getDate() - ((7 - index) * 7) - 5);
+      const end = new Date(start);
+      end.setDate(end.getDate() + 5);
+      return {
+        start,
+        end,
+        label: new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" }).format(start),
+        cans: 0,
+        halves: 0,
+      };
+    });
+    state.inventoryHistory
+      .filter((batch) => batch.entry_type === "usage")
+      .forEach((batch) => {
+        const occurred = new Date(`${batch.occurred_on}T12:00:00`);
+        const week = weeks.find((item) => occurred >= item.start && occurred <= item.end);
+        if (!week) return;
+        (batch.events || []).forEach((event) => {
+          const quantity = event.delta < 0 ? Math.abs(Number(event.delta) || 0) : 0;
+          if (event.inventory_kind === "half_gallon") week.halves += quantity;
+          else if (event.inventory_kind === "can") week.cans += quantity;
+        });
+      });
+    const populatedWeeks = weeks.filter((week) => week.cans + week.halves > 0).length;
+    if (populatedWeeks >= 4) return { weeks, live: true };
+    const previewCans = [18, 21, 19, 24, 23, 27, 29, 32];
+    const previewHalves = [7, 8, 9, 8, 10, 12, 11, 14];
+    return {
+      live: false,
+      weeks: weeks.map((week, index) => ({ ...week, cans: previewCans[index], halves: previewHalves[index] })),
+    };
+  }
+
+  function renderDemandTrend(trend) {
+    const target = document.querySelector("#demandTrendChart");
+    if (!target) return;
+    const values = trend.weeks.flatMap((week) => [week.cans, week.halves]);
+    const max = Math.max(1, ...values) * 1.15;
+    const width = 700;
+    const top = 10;
+    const bottom = 122;
+    const x = (index) => 28 + ((width - 56) / (trend.weeks.length - 1)) * index;
+    const y = (value) => bottom - ((Number(value) || 0) / max) * (bottom - top);
+    const cansPoints = trend.weeks.map((week, index) => `${x(index).toFixed(1)},${y(week.cans).toFixed(1)}`).join(" ");
+    const halfPoints = trend.weeks.map((week, index) => `${x(index).toFixed(1)},${y(week.halves).toFixed(1)}`).join(" ");
+    const areaPoints = `${x(0)},${bottom} ${cansPoints} ${x(trend.weeks.length - 1)},${bottom}`;
+    const grid = [0, .33, .66, 1].map((ratio) => `<line class="trend-grid-line" x1="0" y1="${(top + ratio * (bottom - top)).toFixed(1)}" x2="${width}" y2="${(top + ratio * (bottom - top)).toFixed(1)}"></line>`).join("");
+    const canDots = trend.weeks.map((week, index) => `<circle class="trend-point-cans" cx="${x(index).toFixed(1)}" cy="${y(week.cans).toFixed(1)}" r="3.5"><title>${week.label}: ${week.cans} cans</title></circle>`).join("");
+    const halfDots = trend.weeks.map((week, index) => `<circle class="trend-point-halves" cx="${x(index).toFixed(1)}" cy="${y(week.halves).toFixed(1)}" r="3"><title>${week.label}: ${week.halves} half-gallons</title></circle>`).join("");
+    target.setAttribute("aria-label", `${trend.live ? "Recorded" : "Illustrative"} eight-week inventory usage trend. Latest week: ${trend.weeks.at(-1).cans} cans and ${trend.weeks.at(-1).halves} half-gallons.`);
+    target.innerHTML = `<svg viewBox="0 0 ${width} 136" preserveAspectRatio="none" aria-hidden="true">${grid}<polygon class="trend-area" points="${areaPoints}"></polygon><polyline class="trend-line-cans" points="${cansPoints}"></polyline><polyline class="trend-line-halves" points="${halfPoints}"></polyline>${canDots}${halfDots}</svg><div class="trend-axis-labels">${trend.weeks.map((week) => `<span>${escapeHtml(week.label)}</span>`).join("")}</div><span class="trend-source-label ${trend.live ? "live" : ""}">${trend.live ? "Recorded inventory usage" : "Illustrative trend until 4+ weeks of usage are recorded"}</span>`;
+  }
+
+  function weatherPresentation(code) {
+    const numericCode = Number(code);
+    if (numericCode === 0) return { icon: "☀️", label: "Clear" };
+    if ([1, 2].includes(numericCode)) return { icon: "🌤️", label: "Partly sunny" };
+    if (numericCode === 3) return { icon: "☁️", label: "Cloudy" };
+    if ([45, 48].includes(numericCode)) return { icon: "🌫️", label: "Fog" };
+    if ([51, 53, 55, 56, 57].includes(numericCode)) return { icon: "🌦️", label: "Drizzle" };
+    if ([61, 63, 65, 66, 67, 80, 81, 82].includes(numericCode)) return { icon: "🌧️", label: "Rain" };
+    if ([95, 96, 99].includes(numericCode)) return { icon: "⛈️", label: "Storm" };
+    return { icon: "🌤️", label: "Mixed" };
+  }
+
+  function previewWeatherForTwoWeeks() {
+    const start = new Date(`${currentScheduleTuesday()}T12:00:00`);
+    const samples = [
+      { max: 67, min: 54, precipitation: 8, code: 2 },
+      { max: 69, min: 55, precipitation: 6, code: 1 },
+      { max: 71, min: 56, precipitation: 4, code: 1 },
+      { max: 73, min: 56, precipitation: 5, code: 0 },
+      { max: 75, min: 57, precipitation: 7, code: 0 },
+      { max: 70, min: 56, precipitation: 12, code: 2 },
+      { max: 68, min: 55, precipitation: 9, code: 2 },
+      { max: 70, min: 55, precipitation: 6, code: 1 },
+      { max: 72, min: 56, precipitation: 5, code: 1 },
+      { max: 74, min: 57, precipitation: 4, code: 0 },
+      { max: 76, min: 58, precipitation: 6, code: 0 },
+      { max: 71, min: 56, precipitation: 10, code: 2 },
+    ];
+    return samples.map((sample, index) => {
+      const date = new Date(start);
+      date.setDate(date.getDate() + index + (index >= 6 ? 1 : 0));
+      return { ...sample, date: localIsoDate(date) };
+    });
+  }
+
+  async function loadPlanningWeather() {
+    if (state.planningWeatherStatus !== "idle") return;
+    state.planningWeatherStatus = "loading";
+    renderPlanningWeather();
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => controller.abort(), 8500);
+    try {
+      const endpoint = "https://api.open-meteo.com/v1/forecast?latitude=37.7996&longitude=-122.4193&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max&temperature_unit=fahrenheit&timezone=America%2FLos_Angeles&past_days=6&forecast_days=16";
+      const response = await fetch(endpoint, { signal: controller.signal });
+      if (!response.ok) throw new Error(`Weather request returned ${response.status}`);
+      const data = await response.json();
+      const daily = data?.daily;
+      if (!Array.isArray(daily?.time)) throw new Error("Weather response did not include daily forecasts");
+      state.planningWeather = daily.time.map((date, index) => ({
+        date,
+        code: Number(daily.weather_code?.[index]),
+        max: Math.round(Number(daily.temperature_2m_max?.[index])),
+        min: Math.round(Number(daily.temperature_2m_min?.[index])),
+        precipitation: Math.round(Number(daily.precipitation_probability_max?.[index]) || 0),
+      }));
+      const currentWeekStart = currentScheduleTuesday();
+      const requestedDates = [
+        ...Array.from({ length: 6 }, (_, index) => addDaysToIso(currentWeekStart, index)),
+        ...Array.from({ length: 6 }, (_, index) => addDaysToIso(currentWeekStart, index + 7)),
+      ];
+      if (!requestedDates.every((date) => state.planningWeather.some((day) => day.date === date))) throw new Error("The two-week weather window is not available yet");
+      state.planningWeatherStatus = "live";
+      state.planningWeatherError = "";
+    } catch (error) {
+      state.planningWeather = previewWeatherForTwoWeeks();
+      state.planningWeatherStatus = "preview";
+      state.planningWeatherError = error?.message || "Live weather is unavailable";
+    } finally {
+      window.clearTimeout(timer);
+      renderDashboard();
+    }
+  }
+
+  function planningDailyForecast() {
+    const start = nextPlanningTuesday();
+    return planningStaffing.map((setting, index) => {
+      const date = new Date(start);
+      date.setDate(date.getDate() + index);
+      const dateIso = localIsoDate(date);
+      const weather = state.planningWeather.find((item) => item.date === dateIso);
+      let score = setting.score;
+      if (weather) {
+        if (weather.max >= 74) score += 5;
+        else if (weather.max >= 69) score += 2;
+        if (weather.precipitation >= 55) score -= 7;
+        else if (weather.precipitation >= 35) score -= 3;
+      }
+      score = Math.max(35, Math.min(98, Math.round(score)));
+      const level = score >= 86 ? "Very busy" : score >= 70 ? "Busy" : "Steady";
+      return { ...setting, date, dateIso, weather, score, level };
+    });
+  }
+
+  function renderDailyForecast(days) {
+    const target = document.querySelector("#dailyForecastStrip");
+    if (!target) return;
+    target.innerHTML = days.map((day) => {
+      const weather = weatherPresentation(day.weather?.code);
+      const dateLabel = new Intl.DateTimeFormat("en-US", { month: "numeric", day: "numeric" }).format(day.date);
+      return `<article class="forecast-day ${day.score >= 86 ? "peak" : ""}"><header><strong>${day.day} ${dateLabel}</strong><span title="${escapeHtml(weather.label)}">${weather.icon}</span></header><b>${day.level}</b><meter min="0" max="100" value="${day.score}">${day.score}</meter><small>${day.weather ? `${day.weather.max}° · ${day.weather.precipitation}% rain` : "Weather loading"}</small></article>`;
+    }).join("");
+  }
+
+  function renderForecastDrivers(trend, days) {
+    const target = document.querySelector("#forecastDrivers");
+    if (!target) return;
+    const latest = trend.weeks.at(-1);
+    const prior = trend.weeks.slice(-4, -1);
+    const baseline = prior.length ? prior.reduce((total, week) => total + week.cans + week.halves, 0) / prior.length : latest.cans + latest.halves;
+    const recentDelta = baseline ? Math.round((((latest.cans + latest.halves) - baseline) / baseline) * 100) : 0;
+    const warmest = Math.max(...days.map((day) => day.weather?.max || 0));
+    const peak = days.reduce((best, day) => day.score > best.score ? day : best, days[0]);
+    target.innerHTML = `
+      <div class="forecast-driver"><span class="forecast-driver-icon">IC</span><span><strong>Inventory pull trend</strong><small>${trend.live ? "Recorded" : "Preview"}: ${latest.cans} cans + ${latest.halves} half-gallons in the latest week</small></span><b class="${recentDelta > 0 ? "" : "neutral"}">${recentDelta > 0 ? "+" : ""}${recentDelta}%</b></div>
+      <div class="forecast-driver"><span class="forecast-driver-icon">WX</span><span><strong>Weather effect</strong><small>${state.planningWeatherStatus === "live" ? `Live forecast; warmest day ${warmest}°F` : "Preview values until live weather loads"}</small></span><b class="${warmest >= 72 ? "" : "neutral"}">${warmest >= 72 ? "Positive" : "Neutral"}</b></div>
+      <div class="forecast-driver"><span class="forecast-driver-icon">WK</span><span><strong>Weekend pattern</strong><small>${peak.day} is projected to carry the most pressure</small></span><b>High</b></div>`;
+  }
+
+  function seasonalOccurrence(launch, today = new Date()) {
+    const currentYear = today.getFullYear();
+    let release = new Date(currentYear, launch.month - 1, launch.day, 12);
+    let days = dateDifferenceInDays(release, today);
+    let live = days < 0 && days >= -28;
+    if (days < -28) {
+      release = new Date(currentYear + 1, launch.month - 1, launch.day, 12);
+      days = dateDifferenceInDays(release, today);
+      live = false;
+    }
+    const prep = new Date(release);
+    prep.setDate(prep.getDate() - 5);
+    return { ...launch, release, prep, days, live };
+  }
+
+  function formatPlanningDate(date, includeYear = false) {
+    return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", ...(includeYear ? { year: "numeric" } : {}) }).format(date);
+  }
+
+  function renderSeasonalBoard() {
+    const target = document.querySelector("#seasonalLaunchBoard");
+    if (!target) return [];
+    const launches = seasonalLaunches.map((launch) => seasonalOccurrence(launch)).sort((a, b) => a.release - b.release);
+    target.innerHTML = launches.map((launch, index) => {
+      const countdown = launch.live ? "Live now" : launch.days === 0 ? "Today" : launch.days === 1 ? "Tomorrow" : `${launch.days} days`;
+      return `<article class="season-card ${escapeHtml(launch.id)} ${index === 0 ? "next" : ""}"><span class="season-swatch" aria-hidden="true"></span><div class="season-card-content"><header><div><small>${escapeHtml(launch.season)}</small><strong>Out ${formatPlanningDate(launch.release)}</strong></div><span class="season-countdown">${countdown}</span></header><p class="season-flavors">${launch.flavors.map(escapeHtml).join(" · ")}</p><p class="season-history">${escapeHtml(launch.history)}</p><div class="season-prep"><span>Recommended prep</span><strong>${formatPlanningDate(launch.prep)}</strong></div></div></article>`;
+    }).join("");
+    return launches;
+  }
+
+  function renderPlanningTasks(launches, days) {
+    const target = document.querySelector("#planningTaskBoard");
+    if (!target) return;
+    const nextLaunch = launches.find((launch) => !launch.live) || launches[0];
+    const peak = days.reduce((best, day) => day.score > best.score ? day : best, days[0]);
+    const prepUrgency = dateDifferenceInDays(nextLaunch.prep) <= 14 ? "urgent" : "";
+    const trainee = state.team.find((employee) => String(employee.id) === String(state.settings.traineeId));
+    const tasks = [
+      {
+        className: prepUrgency,
+        marker: "IC",
+        title: `Prepare ${nextLaunch.season.toLowerCase()} seasonal production`,
+        detail: nextLaunch.flavors.join(" · "),
+        due: `Prep by ${formatPlanningDate(nextLaunch.prep)}`,
+      },
+      {
+        className: "ready",
+        marker: "SCH",
+        title: `Review ${peak.day} coverage for a ${peak.level.toLowerCase()} day`,
+        detail: `Projected demand ${peak.score}/100; keep the extra peak coverage in the draft.`,
+        due: "Before scheduling",
+      },
+      {
+        className: "",
+        marker: "SF",
+        title: "Verify major SF events for the planning window",
+        detail: "Event impact is intentionally excluded until a trusted calendar feed is connected.",
+        due: "Data setup",
+      },
+      {
+        className: "ready",
+        marker: "TRN",
+        title: `Plan ${trainee?.name || "trainee"}’s training pairings`,
+        detail: "Keep training earlier in the week with an available trainer; avoid the Saturday peak.",
+        due: "Before scheduling",
+      },
+    ];
+    document.querySelector("#planningTaskCount").textContent = `${tasks.length} items`;
+    target.innerHTML = tasks.map((task) => `<article class="planning-task ${task.className}"><span class="task-marker">${task.marker}</span><div><strong>${escapeHtml(task.title)}</strong><small>${escapeHtml(task.detail)}</small></div><span class="task-due">${escapeHtml(task.due)}</span></article>`).join("");
+  }
+
+  function weatherWeekMarkup(label, startIso, planningFocus = false) {
+    const dates = Array.from({ length: 6 }, (_, index) => addDaysToIso(startIso, index));
+    const start = new Date(`${startIso}T12:00:00`);
+    const end = new Date(`${dates.at(-1)}T12:00:00`);
+    const range = `${new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" }).format(start)}–${new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" }).format(end)}`;
+    const todayIso = localIsoDate(new Date());
+    const cards = dates.map((dateIso) => {
+      const date = new Date(`${dateIso}T12:00:00`);
+      const day = state.planningWeather.find((item) => item.date === dateIso);
+      const weather = weatherPresentation(day?.code);
+      const dayLabel = new Intl.DateTimeFormat("en-US", { weekday: "short" }).format(date);
+      const dateLabel = new Intl.DateTimeFormat("en-US", { month: "numeric", day: "numeric" }).format(date);
+      return `<article class="weather-day ${dateIso < todayIso ? "past" : ""}"><strong>${dayLabel}</strong><span class="weather-date">${dateLabel}</span><span class="weather-icon" title="${escapeHtml(weather.label)}">${weather.icon}</span><b>${day?.max ?? "—"}° / ${day?.min ?? "—"}°</b><small>${day?.precipitation ?? 0}% rain</small></article>`;
+    }).join("");
+    return `<section class="weather-week ${planningFocus ? "planning-focus" : ""}"><header><div><strong>${label}</strong><span>${range} · Tue–Sun</span></div>${planningFocus ? `<b>Schedule focus</b>` : ""}</header><div class="weather-week-grid">${cards}</div></section>`;
+  }
+
+  function renderPlanningWeather() {
+    const target = document.querySelector("#weatherForecastBoard");
+    const boardStatus = document.querySelector("#weatherBoardStatus");
+    const sourceStatus = document.querySelector("#weatherSourceStatus");
+    const freshness = document.querySelector("#forecastFreshness");
+    const readiness = document.querySelector(".source-readiness-heading span");
+    if (!target) return;
+    if (state.planningWeatherStatus === "loading" || state.planningWeatherStatus === "idle") {
+      target.innerHTML = `<div class="weather-loading">Loading this week and next week in San Francisco…</div>`;
+      if (boardStatus) { boardStatus.textContent = "Loading weather"; boardStatus.className = "live-source-badge"; }
+      return;
+    }
+    const currentWeekStart = currentScheduleTuesday();
+    const nextWeekStart = addDaysToIso(currentWeekStart, 7);
+    target.innerHTML = `${weatherWeekMarkup("Next week", nextWeekStart, true)}${weatherWeekMarkup("This week", currentWeekStart)}`;
+    const isLive = state.planningWeatherStatus === "live";
+    if (boardStatus) {
+      boardStatus.textContent = isLive ? "Live SF forecast" : "Weather preview";
+      boardStatus.className = `live-source-badge ${isLive ? "live" : "preview"}`;
+    }
+    if (sourceStatus) {
+      sourceStatus.className = `source-row ${isLive ? "connected" : "error"}`;
+      sourceStatus.querySelector("small").textContent = isLive ? "Open-Meteo daily forecast" : "Preview values shown";
+      sourceStatus.querySelector("b").textContent = isLive ? "Connected" : "Preview";
+    }
+    if (readiness) readiness.textContent = `${isLive ? 2 : 1} of 4 live`;
+    if (freshness) {
+      freshness.className = isLive ? "live" : "";
+      freshness.innerHTML = `<i aria-hidden="true"></i> ${isLive ? "Live weather · demand forecast updated" : "Forecast preview · live weather unavailable"}`;
+    }
+  }
+
+  function renderScheduleRecommendation(days) {
+    const target = document.querySelector("#scheduleRecommendation");
+    if (!target) return;
+    target.innerHTML = days.map((day) => {
+      let am = day.am;
+      let pm = day.pm;
+      if (day.score >= 88) { am = Math.max(am, 4); pm = Math.max(pm, 4); }
+      else if (day.score >= 80) { am = Math.max(am, 3); pm = Math.max(pm, 4); }
+      else if (day.score >= 70) { am = Math.max(am, 3); pm = Math.max(pm, 3); }
+      return `<div class="schedule-day-setting ${day.score >= 86 ? "peak" : ""}"><strong>${day.day}</strong><span class="shift-needs"><span>AM <b>${am}</b></span><span>PM <b>${pm}</b></span></span></div>`;
+    }).join("");
+  }
+
   function renderDashboard() {
-    const submitted = state.team.filter((employee) => employee.submitted).length;
-    const lateDateRequests = state.dateRequests.filter((request) => request.schedule_week_start === state.settings.weekStart && dateRequestIsLate(request)).length;
-    const late = state.team.filter(isRequestLate).length + lateDateRequests;
-    const urgentShiftChanges = state.shiftChangeRequests.filter((request) => request.urgent && !["approved", "declined", "cancelled"].includes(request.status)).length;
-    const attentionCount = late + urgentShiftChanges;
-    document.querySelector("#requestMetric").textContent = urgentShiftChanges ? `${urgentShiftChanges} urgent` : late ? `${late} late` : `${submitted} of ${state.team.length}`;
-    const requestStatusPill = document.querySelector(".status-card.mint .status-pill");
-    if (requestStatusPill) {
-      requestStatusPill.textContent = attentionCount ? "Needs review" : "On track";
-      requestStatusPill.classList.toggle("good", !attentionCount);
-      requestStatusPill.classList.toggle("warn", Boolean(attentionCount));
+    const range = planningDateRange();
+    const weekLabel = document.querySelector("#planningWeekLabel");
+    if (weekLabel) weekLabel.textContent = `${range.label} · Tuesday–Sunday`;
+    const trend = planningTrendData();
+    renderDemandTrend(trend);
+    const days = planningDailyForecast();
+    renderDailyForecast(days);
+    renderForecastDrivers(trend, days);
+    renderPlanningWeather();
+    renderScheduleRecommendation(days);
+    const launches = renderSeasonalBoard();
+    renderPlanningTasks(launches, days);
+    const averageScore = Math.round(days.reduce((total, day) => total + day.score, 0) / days.length);
+    const forecastScore = document.querySelector("#forecastScore");
+    const forecastBadge = document.querySelector("#forecastLevelBadge");
+    const forecastChange = document.querySelector("#forecastChange");
+    const narrative = document.querySelector("#forecastNarrative");
+    const peak = days.reduce((best, day) => day.score > best.score ? day : best, days[0]);
+    const level = averageScore >= 83 ? "Very busy" : averageScore >= 68 ? "Busy" : "Steady";
+    if (forecastScore) forecastScore.textContent = averageScore;
+    if (forecastBadge) {
+      forecastBadge.textContent = level;
+      forecastBadge.className = `forecast-level-badge ${level === "Very busy" ? "very-busy" : level === "Steady" ? "steady" : ""}`;
     }
-    const requestAttention = document.querySelector('[data-schedule-view="requests"]');
-    if (requestAttention) {
-      requestAttention.querySelector("strong").textContent = urgentShiftChanges ? `Review ${urgentShiftChanges} urgent shift alert${urgentShiftChanges === 1 ? "" : "s"}` : late ? `Review ${late} late request${late === 1 ? "" : "s"}` : "Review employee requests";
-      requestAttention.querySelector("small").textContent = urgentShiftChanges ? "Call-off or coverage needs attention" : late ? "Submitted after the Thursday cutoff" : `${submitted} of ${state.team.length} submitted`;
-    }
-    document.querySelector("#icMetric").textContent = `${state.settings.icTarget} days`;
-    const trainee = state.team.find((employee) => employee.id === state.settings.traineeId);
-    document.querySelector("#trainingMetric").textContent = state.settings.trainingEnabled && trainee ? trainee.name : "None";
+    if (forecastChange) forecastChange.textContent = `↑ ${Math.max(0, Math.round(((averageScore - 64) / 64) * 100))}% vs. recent baseline`;
+    if (narrative) narrative.textContent = `Plan for a stronger Friday–Sunday, with the highest pressure on ${peak.day} at ${peak.score}/100.`;
+    if (state.planningWeatherStatus === "idle") loadPlanningWeather();
   }
 
   function applyDateRequestsToTeam(weekStart) {
@@ -1454,12 +1891,58 @@
     }, 350);
   }
 
+  function chatDataFingerprint() {
+    return JSON.stringify([
+      state.chatThreads.map((thread) => [thread.id, thread.updated_at, (thread.member_ids || []).length]),
+      state.chatMessages.map((message) => [message.id, message.created_at]),
+    ]);
+  }
+
+  async function refreshChatData() {
+    if (state.mode !== "supabase" || state.chatRefreshBusy || !state.profile || document.hidden) return;
+    state.chatRefreshBusy = true;
+    const before = chatDataFingerprint();
+    const composer = document.querySelector("#chatMessageForm textarea");
+    const draft = composer?.value || "";
+    const composerFocused = document.activeElement === composer;
+    const threadId = state.activeChatThreadId;
+    try {
+      await loadChatData({ ensureTeam: false });
+      if (chatDataFingerprint() !== before) {
+        renderMessages();
+        const nextComposer = document.querySelector("#chatMessageForm textarea");
+        if (nextComposer && String(state.activeChatThreadId) === String(threadId) && draft) {
+          nextComposer.value = draft;
+          if (composerFocused) nextComposer.focus();
+        }
+        const list = document.querySelector("[data-chat-message-list]");
+        if (list) list.scrollTop = list.scrollHeight;
+      }
+    } finally {
+      state.chatRefreshBusy = false;
+    }
+  }
+
   function queueChatRefresh() {
     window.clearTimeout(state.chatRefreshDebounce);
-    state.chatRefreshDebounce = window.setTimeout(async () => {
-      await loadChatData();
-      renderMessages();
-    }, 250);
+    state.chatRefreshDebounce = window.setTimeout(refreshChatData, 250);
+  }
+
+  async function refreshInventoryData() {
+    if (state.mode !== "supabase" || !state.canAccessInventory || state.inventoryBusy || state.inventoryRefreshBusy || document.hidden) return;
+    state.inventoryRefreshBusy = true;
+    try {
+      await loadInventoryData({ silent: true });
+      renderInventory();
+      renderRecords();
+    } finally {
+      state.inventoryRefreshBusy = false;
+    }
+  }
+
+  function queueInventoryRefresh() {
+    window.clearTimeout(state.inventoryRefreshDebounce);
+    state.inventoryRefreshDebounce = window.setTimeout(refreshInventoryData, 350);
   }
 
   function startRequestSync() {
@@ -1473,25 +1956,38 @@
         .on("postgres_changes", { event: "*", schema: "public", table: "date_requests" }, queueRequestRefresh);
       state.requestRefreshTimer = window.setInterval(refreshWeeklyRequests, 30000);
     }
-    state.requestSyncChannel = channel
+    channel = channel
       .on("postgres_changes", { event: "*", schema: "public", table: "shift_change_requests" }, queueShiftChangeRefresh)
       .on("postgres_changes", { event: "*", schema: "public", table: "shift_cover_offers" }, queueShiftChangeRefresh)
       .on("postgres_changes", { event: "*", schema: "public", table: "schedule_assignments" }, queueShiftChangeRefresh)
       .on("postgres_changes", { event: "*", schema: "public", table: "chat_threads" }, queueChatRefresh)
       .on("postgres_changes", { event: "*", schema: "public", table: "chat_members" }, queueChatRefresh)
-      .on("postgres_changes", { event: "*", schema: "public", table: "chat_messages" }, queueChatRefresh)
-      .subscribe();
+      .on("postgres_changes", { event: "*", schema: "public", table: "chat_messages" }, queueChatRefresh);
+    if (state.canAccessInventory) {
+      ["ice_cream_flavors", "ice_cream_inventory", "ice_cream_inventory_batches", "ice_cream_inventory_events", "ice_cream_production_sheets", "ice_cream_production_slots", "ice_cream_production_cells"].forEach((table) => {
+        channel = channel.on("postgres_changes", { event: "*", schema: "public", table }, queueInventoryRefresh);
+      });
+      state.inventoryRefreshTimer = window.setInterval(refreshInventoryData, 10000);
+    }
+    state.requestSyncChannel = channel.subscribe();
+    state.chatRefreshTimer = window.setInterval(refreshChatData, 5000);
   }
 
   function stopRequestSync() {
     window.clearInterval(state.requestRefreshTimer);
+    window.clearInterval(state.chatRefreshTimer);
+    window.clearInterval(state.inventoryRefreshTimer);
     window.clearTimeout(state.requestRefreshDebounce);
     window.clearTimeout(state.shiftChangeRefreshDebounce);
     window.clearTimeout(state.chatRefreshDebounce);
+    window.clearTimeout(state.inventoryRefreshDebounce);
     state.requestRefreshTimer = null;
+    state.chatRefreshTimer = null;
+    state.inventoryRefreshTimer = null;
     state.requestRefreshDebounce = null;
     state.shiftChangeRefreshDebounce = null;
     state.chatRefreshDebounce = null;
+    state.inventoryRefreshDebounce = null;
     if (state.requestSyncChannel && supabaseClient) supabaseClient.removeChannel(state.requestSyncChannel);
     state.requestSyncChannel = null;
   }
@@ -1662,22 +2158,14 @@
     return `<div class="inventory-mobile-master half-gallon-mobile-master" aria-label="Mobile half-gallon count sheet">${groups}</div>`;
   }
 
-  function renderInventoryMaster() {
-    const kind = state.inventoryMasterView;
-    const isHalfGallons = kind === "half_gallon";
-    const halfFlavors = state.inventoryFlavors.filter((flavor) => flavor.tracksHalfGallons);
-    const sheet = viewedProductionSheet();
-    const activeSheet = activeProductionSheet();
-    const slots = productionSheetSlots(sheet);
-    const sheetFlavors = productionSheetFlavors(sheet);
-    const productionCell = (slot, flavor, kind) => {
-      const cell = productionSheetCell(slot, flavor.id);
-      const value = kind === "can" ? cell?.can_quantity : cell?.half_gallon_quantity;
-      return `<td>${Number(value) > 0 ? value : ""}</td>`;
-    };
-    const sheetChoices = state.productionSheets.map((item) => `<option value="${item.id}" ${item.id === sheet?.id ? "selected" : ""}>Sheet #${item.sheet_number}${item.status === "active" ? " · Current" : " · Complete"}</option>`).join("");
-    const daysUsed = productionSheetDaysUsed(sheet);
-    const productionSheet = `<div class="inventory-paper-scroll inventory-desktop-master" aria-label="Production master sheet with all date columns.">
+  function productionSheetCellMarkup(slot, flavor, kind) {
+    const cell = productionSheetCell(slot, flavor.id);
+    const value = kind === "can" ? cell?.can_quantity : cell?.half_gallon_quantity;
+    return `<td>${Number(value) > 0 ? value : ""}</td>`;
+  }
+
+  function productionMasterTableMarkup(sheet, sheetFlavors, slots, extraClass = "") {
+    return `<div class="inventory-paper-scroll inventory-desktop-master ${extraClass}" aria-label="Production master sheet with all date columns.">
       <table class="inventory-paper-table production-master-sheet">
         <caption>Full-can master count with five can-production dates and five half-gallon production dates</caption>
         <thead><tr>
@@ -1689,12 +2177,25 @@
         <tbody>${inventoryPaperRows(sheetFlavors, 13, (flavor) => `<tr>
           <th scope="row">${escapeHtml(flavor.name)}</th>
           <td class="inventory-current-count">${Number.isInteger(flavor.canCount) ? flavor.canCount : `<span>Count needed</span>`}</td>
-          ${slots.map((slot) => productionCell(slot, flavor, "can")).join("")}
+          ${slots.map((slot) => productionSheetCellMarkup(slot, flavor, "can")).join("")}
           <td class="half-gallon-divider"></td>
-          ${slots.map((slot) => productionCell(slot, flavor, "half_gallon")).join("")}
+          ${slots.map((slot) => productionSheetCellMarkup(slot, flavor, "half_gallon")).join("")}
         </tr>`)}</tbody>
       </table>
     </div>`;
+  }
+
+  function renderInventoryMaster() {
+    const kind = state.inventoryMasterView;
+    const isHalfGallons = kind === "half_gallon";
+    const halfFlavors = state.inventoryFlavors.filter((flavor) => flavor.tracksHalfGallons);
+    const sheet = viewedProductionSheet();
+    const activeSheet = activeProductionSheet();
+    const slots = productionSheetSlots(sheet);
+    const sheetFlavors = productionSheetFlavors(sheet);
+    const sheetChoices = state.productionSheets.map((item) => `<option value="${item.id}" ${item.id === sheet?.id ? "selected" : ""}>Sheet #${item.sheet_number}${item.status === "active" ? " · Current" : " · Complete"}</option>`).join("");
+    const daysUsed = productionSheetDaysUsed(sheet);
+    const productionSheet = productionMasterTableMarkup(sheet, sheetFlavors, slots);
     const halfGallonSheet = `<div class="inventory-paper-scroll half-gallon-paper-scroll inventory-desktop-master">
       <table class="inventory-paper-table half-gallon-master-sheet">
         <caption>Current half-gallon inventory by flavor</caption>
@@ -1719,12 +2220,46 @@
   function renderProductionArchiveLibrary() {
     const completed = state.productionSheets.filter((sheet) => sheet.status === "complete");
     return `<section class="panel production-archive-panel">
-      <div class="panel-heading"><div><p class="eyebrow">Permanent records</p><h3>Past master sheet library</h3><p>Every completed five-day sheet stays here with its frozen counts and production details.</p></div><span class="count-badge">${completed.length}</span></div>
+      <div class="panel-heading"><div><p class="eyebrow">Completed records</p><h3>Past master sheets</h3><p>Every completed five-day sheet stays here with its frozen counts and production details.</p></div><span class="count-badge">${completed.length}</span></div>
       ${completed.length ? `<div class="production-archive-list">${completed.map((sheet) => {
         const totals = productionSheetTotals(sheet);
         return `<article class="production-archive-card"><div><span class="inventory-history-type archive">Archived</span><strong>Master sheet #${sheet.sheet_number}</strong><p>${productionSheetDateRange(sheet)}</p><small>${totals.cans} cans made · ${totals.halfGallons} half gallons made${sheet.completed_by_name ? ` · Completed by ${escapeHtml(sheet.completed_by_name)}` : ""}</small></div><div class="production-archive-actions"><button type="button" class="secondary-button compact" data-view-production-sheet="${sheet.id}">View sheet</button><button type="button" class="secondary-button compact" data-print-production-sheet="${sheet.id}">Print / Save PDF</button><button type="button" class="secondary-button compact" data-download-production-sheet="${sheet.id}">Download data</button></div></article>`;
       }).join("")}</div>` : `<div class="inventory-empty">The first finished five-day sheet will appear here.</div>`}
     </section>`;
+  }
+
+  function renderRecords() {
+    if (!elements.records || state.role !== "manager") return;
+    let inventoryMarkup = "";
+    const inventoryHeading = `<div class="records-section-heading"><div><p class="eyebrow">Inventory records</p><h3>Production master sheets</h3><p>Follow the current sheet live, then return to every completed five-day sheet.</p></div></div>`;
+    if (state.inventoryLoading && !state.productionSheets.length) {
+      inventoryMarkup = `${inventoryHeading}<section class="panel inventory-loading"><strong>Loading master sheet records…</strong></section>`;
+      elements.records.innerHTML = `${scheduleRecordsMarkup()}<section class="records-section">${inventoryMarkup}</section>`;
+      return;
+    }
+    if (state.inventoryError) {
+      inventoryMarkup = `${inventoryHeading}<section class="panel inventory-error"><h3>Inventory records are not connected yet.</h3><p>${escapeHtml(state.inventoryError)}</p></section>`;
+      elements.records.innerHTML = `${scheduleRecordsMarkup()}<section class="records-section">${inventoryMarkup}</section>`;
+      return;
+    }
+    const sheet = activeProductionSheet();
+    if (!sheet) {
+      inventoryMarkup = `${inventoryHeading}<section class="panel records-empty-state"><p class="eyebrow">Live records</p><h3>No production master sheet yet</h3><p>The current sheet will appear here as soon as inventory setup creates it.</p></section>${renderProductionArchiveLibrary()}`;
+      elements.records.innerHTML = `${scheduleRecordsMarkup()}<section class="records-section">${inventoryMarkup}</section>`;
+      return;
+    }
+    const slots = productionSheetSlots(sheet);
+    const flavors = productionSheetFlavors(sheet);
+    const totals = productionSheetTotals(sheet);
+    const daysUsed = productionSheetDaysUsed(sheet);
+    inventoryMarkup = `${inventoryHeading}<section class="panel live-record-panel">
+      <div class="panel-heading records-current-heading"><div><p class="eyebrow">Current · updates automatically</p><h3>Master sheet #${sheet.sheet_number}</h3><p>${daysUsed}/5 production days filled · ${productionSheetDateRange(sheet)}</p></div><span class="records-live-badge"><i aria-hidden="true"></i> Live</span></div>
+      <div class="records-current-stats"><span><small>Full cans made</small><strong>${totals.cans}</strong></span><span><small>½ gallons made</small><strong>${totals.halfGallons}</strong></span><span><small>Sheet progress</small><strong>${daysUsed}/5</strong></span></div>
+      ${productionMasterTableMarkup(sheet, flavors, slots, "records-master-table")}
+      ${mobileProductionMaster(flavors, slots)}
+      <div class="records-current-actions"><button type="button" class="secondary-button compact" data-view-production-sheet="${sheet.id}">Open in Inventory</button><button type="button" class="secondary-button compact" data-print-production-sheet="${sheet.id}">Print / Save PDF</button></div>
+    </section>${renderProductionArchiveLibrary()}`;
+    elements.records.innerHTML = `${scheduleRecordsMarkup()}<section class="records-section">${inventoryMarkup}</section>`;
   }
 
   function openingCountInput(flavor, kind) {
@@ -2239,7 +2774,6 @@
       </div>
       ${renderInventoryCameraReader()}
       ${renderInventoryMaster()}
-      ${renderProductionArchiveLibrary()}
       ${renderOpeningCountForm(missingUnitCount)}
       ${missingUnitCount ? "" : renderInventoryEntryForm()}
       ${renderFlavorManager()}
@@ -2496,9 +3030,9 @@
     showToast("Report downloaded for data analysis.");
   }
 
-  async function loadInventoryData() {
+  async function loadInventoryData({ silent = false } = {}) {
     if (!state.canAccessInventory || !supabaseClient) return;
-    state.inventoryLoading = true;
+    if (!silent) state.inventoryLoading = true;
     state.inventoryError = "";
     let flavorRequest = supabaseClient.from("ice_cream_flavors")
       .select("id, name, category, sort_order, tracks_half_gallons, active")
@@ -3170,7 +3704,6 @@
       elements.scheduleBuilderModule.hidden = true;
       elements.scheduleAvailabilityModule.hidden = true;
       elements.schedulePriorityModule.hidden = true;
-      elements.scheduleRecordsModule.hidden = true;
       elements.scheduleRequestsModule.hidden = true;
       document.querySelector("#generateButtonTop").hidden = true;
       return;
@@ -3186,9 +3719,7 @@
     elements.scheduleBuilderModule.hidden = state.scheduleModuleView !== "builder";
     elements.scheduleAvailabilityModule.hidden = state.scheduleModuleView !== "availability";
     elements.schedulePriorityModule.hidden = state.scheduleModuleView !== "priority";
-    elements.scheduleRecordsModule.hidden = state.scheduleModuleView !== "records";
     if (state.scheduleModuleView === "priority") renderSchedulingPriority();
-    if (state.scheduleModuleView === "records") renderScheduleRecords();
     elements.scheduleRequestsModule.hidden = false;
     elements.scheduleRequestsModule.open = state.requestsExpanded;
     document.querySelector("#generateButtonTop").hidden = state.scheduleModuleView !== "builder";
@@ -3207,8 +3738,8 @@
     }).format(date);
   }
 
-  function renderScheduleRecords() {
-    if (state.role !== "manager" || !elements.scheduleRecordsContent) return;
+  function scheduleRecordsMarkup() {
+    if (state.role !== "manager") return "";
     const records = state.scheduleHistory;
     if (state.selectedScheduleRecordId && !findScheduleRecord(state.selectedScheduleRecordId)) {
       state.selectedScheduleRecordId = "";
@@ -3228,39 +3759,52 @@
       ${buildScheduleSheet(scheduleRecordOption(selected), selected.week_start, scheduleRecordRoster(selected))}
       <div class="schedule-record-preview-actions"><button type="button" class="secondary-button compact" data-print-schedule-record="${escapeHtml(selected.id)}">Print / Save PDF</button><button type="button" class="secondary-button compact" data-download-schedule-record="${escapeHtml(selected.id)}">Download CSV</button></div>
     </section>` : "";
-    elements.scheduleRecordsContent.innerHTML = `<section class="panel schedule-record-intro">
-      <div class="panel-heading"><div><p class="eyebrow">Business records</p><h3>Past schedule library</h3><p>Published schedules stay in Supabase instead of being deleted. Print a PDF or download a CSV whenever you also want a copy outside the Hub.</p></div><span class="count-badge">${records.length}</span></div>
-    </section>
-    ${selectedMarkup}
-    ${records.length ? `<div class="schedule-record-list">${cards}</div>` : `<div class="panel inventory-empty">Your first published schedule will appear here and remain available after a newer schedule replaces it.</div>`}`;
+    return `<section class="records-section schedule-records-section">
+      <section class="panel schedule-record-intro">
+        <div class="panel-heading"><div><p class="eyebrow">Schedule records</p><h3>Published schedule history</h3><p>Every published schedule stays here instead of being deleted. Print a PDF or download a CSV whenever you also want a copy outside the Hub.</p></div><span class="count-badge">${records.length}</span></div>
+      </section>
+      ${selectedMarkup}
+      ${records.length ? `<div class="schedule-record-list">${cards}</div>` : `<div class="panel inventory-empty">Your first published schedule will appear here and remain available after a newer schedule replaces it.</div>`}
+    </section>`;
   }
 
   function renderSchedulingPriority() {
     if (state.role !== "manager" || !elements.schedulingPriorityContent) return;
+    const mobileDirectReorder = isMobilePriorityMode();
+    const reorderEnabled = state.priorityEditing || mobileDirectReorder;
     const orderedTeam = priorityOrderedTeam();
     const rows = orderedTeam.map((employee, index) => {
       const rank = index + 1;
-      const weekendStatus = employee.weekendRequired
-        ? employeeOffersWeekend(employee)
-          ? `<span class="priority-weekend-status ready">Weekend offered</span>`
-          : `<span class="priority-weekend-status missing">Weekend required</span>`
-        : `<span class="priority-weekend-status neutral">No weekend rule</span>`;
-      return `<article class="priority-row ${state.priorityEditing ? "editing" : ""}" data-priority-code="${escapeHtml(employee.code)}">
+      const weekendDaysOffered = employeeWeekendDaysOffered(employee);
+      const weekendStatus = employee.weekendDaysRequired
+        ? weekendDaysOffered >= employee.weekendDaysRequired
+          ? `<span class="priority-weekend-status ready">${weekendDaysOffered}/3 weekend offered</span>`
+          : `<span class="priority-weekend-status missing">Needs ${employee.weekendDaysRequired}/3 weekend</span>`
+        : `<span class="priority-weekend-status neutral">0/3 required</span>`;
+      return `<article class="priority-row ${state.priorityEditing ? "editing" : ""} ${mobileDirectReorder ? "direct-reorder" : ""}" data-priority-code="${escapeHtml(employee.code)}">
         <span class="priority-rank" aria-label="Priority rank ${rank}">${rank}</span>
-        <div class="priority-person"><strong>${escapeHtml(employee.name)}</strong><small>${escapeHtml(employee.code)} · ${employee.skills.length ? employee.skills.map(roleLabel).join(", ") : "Team member"}</small><span class="priority-manager-limits">${employee.minShifts}–${employee.maxShifts} days · ${employee.weekdayRequirement} weekday${employee.weekdayRequirement === 1 ? "" : "s"}</span></div>
+        <div class="priority-person" ${reorderEnabled ? `data-priority-drag-source data-priority-code="${escapeHtml(employee.code)}"` : ""}><strong>${escapeHtml(employee.name)}</strong><small>${escapeHtml(employee.code)} · ${employee.skills.length ? employee.skills.map(roleLabel).join(", ") : "Team member"}</small><span class="priority-manager-limits">${employee.minShifts}–${employee.maxShifts} days · ${employee.weekdayRequirement}/3 weekdays · ${employee.weekendDaysRequired}/3 weekend</span></div>
         ${weekendStatus}
-        ${state.priorityEditing ? `<button type="button" class="priority-drag-handle" data-priority-drag-handle data-priority-code="${escapeHtml(employee.code)}" aria-label="Drag ${escapeHtml(employee.name)} to a new priority. Use up and down arrow keys for keyboard reordering."><span aria-hidden="true">≡</span></button>` : ""}
+        ${state.priorityEditing && !mobileDirectReorder ? `<button type="button" class="priority-drag-handle" data-priority-drag-handle data-priority-code="${escapeHtml(employee.code)}" aria-label="Drag ${escapeHtml(employee.name)} to a new priority. Use up and down arrow keys for keyboard reordering."><span aria-hidden="true">≡</span></button>` : ""}
       </article>`;
     }).join("");
     elements.schedulingPriorityContent.innerHTML = `
       <section class="panel priority-policy-panel">
-        <div class="priority-policy-heading"><div><p class="eyebrow">Manager only</p><h3>Business coverage comes first</h3></div>${state.priorityEditing ? "" : `<button type="button" class="secondary-button compact" data-edit-priority>✎ Edit</button>`}</div>
-        <p>Qualifications and coverage rules are checked first. When more than one qualified employee wants the same shift, the person higher on this list receives that preference first.</p>
-        <div class="priority-policy-callout"><strong>This is not public seniority.</strong><span>Employees do not see their rank. Managers can base the order on reliability, consistency, performance, and current business needs.</span></div>
+        <div class="priority-policy-heading"><div><p class="eyebrow">Manager only</p><h3>Scheduling priority</h3></div>${state.priorityEditing || mobileDirectReorder ? "" : `<button type="button" class="secondary-button compact" data-edit-priority>✎ Edit</button>`}</div>
+        <p class="priority-policy-principle">Base the order on reliability, consistency, performance, and current business needs.</p>
         <button type="button" class="priority-availability-link" data-open-availability-rules>Edit minimums, maximums & availability rules →</button>
       </section>
+      ${mobileDirectReorder ? `<p class="priority-mobile-reorder-note">Press and hold a name, then drag it into place. The order saves when you let go.</p>` : ""}
       <section class="priority-list" aria-label="Scheduling priority order">${rows}</section>
-      ${state.priorityEditing ? `<div class="priority-edit-actions"><button type="button" class="secondary-button" data-cancel-priority>Cancel</button><button type="button" class="primary-button" data-save-priority ${state.schedulingPolicyBusy ? "disabled" : ""}>${state.schedulingPolicyBusy ? "Saving…" : "Save order"}</button></div><p class="priority-save-note">Press and drag the handle. Keep it near the top or bottom of your iPhone screen and the page will scroll until you lift your finger.</p>` : `<p class="priority-save-note">Minimums, maximums, and weekend availability are edited from Availability. Employees never see these rules or this order.</p>`}`;
+      ${state.priorityEditing && !mobileDirectReorder ? `<div class="priority-edit-actions"><button type="button" class="secondary-button" data-cancel-priority>Cancel</button><button type="button" class="primary-button" data-save-priority ${state.schedulingPolicyBusy ? "disabled" : ""}>${state.schedulingPolicyBusy ? "Saving…" : "Save order"}</button></div><p class="priority-save-note">Press and hold any employee name, then drag. Move near the top or bottom edge to scroll quickly.</p>` : ""}`;
+  }
+
+  function isMobilePriorityMode() {
+    return window.matchMedia("(max-width: 760px)").matches;
+  }
+
+  function canReorderPriority() {
+    return state.role === "manager" && !state.schedulingPolicyBusy && (state.priorityEditing || isMobilePriorityMode());
   }
 
   function beginPriorityEdit() {
@@ -3272,6 +3816,7 @@
   }
 
   function cancelPriorityEdit() {
+    cancelPriorityPointerPress();
     const snapshot = state.priorityPolicySnapshot;
     if (snapshot) {
       state.settings.priorityOrder = [...snapshot.priorityOrder];
@@ -3283,7 +3828,7 @@
     renderSchedulingPriority();
   }
 
-  async function saveSchedulingPolicy() {
+  async function saveSchedulingPolicy({ revertOrder = null, successMessage = "Scheduling priority saved." } = {}) {
     if (state.role !== "manager" || state.schedulingPolicyBusy) return;
     syncSchedulingPolicy();
     state.schedulingPolicyBusy = true;
@@ -3292,6 +3837,10 @@
     if (state.mode === "supabase") {
       const { error } = await supabaseClient.rpc("save_staff_scheduling_policy", { p_policies: policies });
       if (error) {
+        if (revertOrder) {
+          state.settings.priorityOrder = [...revertOrder];
+          syncSchedulingPolicy();
+        }
         state.schedulingPolicyBusy = false;
         const setupMissing = /save_staff_scheduling_policy|weekday_days_required|weekend_required|schema cache|function/i.test(error.message || "");
         showToast(setupMissing ? "The manager scheduling-rules update still needs its Supabase migration." : `Could not save scheduling priority: ${error.message}`);
@@ -3307,7 +3856,7 @@
     state.priorityDragCode = "";
     renderSchedulingPriority();
     renderAvailabilityMatrix();
-    showToast("Scheduling priority saved.");
+    showToast(successMessage);
   }
 
   function schedulingPolicyPayload() {
@@ -3318,7 +3867,8 @@
       min_shifts: employee.minShifts,
       max_shifts: employee.maxShifts,
       weekday_days_required: employee.weekdayRequirement,
-      weekend_required: employee.weekendRequired,
+      weekend_days_required: employee.weekendDaysRequired,
+      weekend_required: employee.weekendDaysRequired > 0,
     }));
   }
 
@@ -3345,35 +3895,53 @@
     });
   }
 
+  function priorityDragHitY(clientY) {
+    const bottomNav = document.querySelector(".bottom-nav");
+    const navVisible = bottomNav && window.getComputedStyle(bottomNav).display !== "none";
+    const lowerEdge = navVisible ? bottomNav.getBoundingClientRect().top - 12 : window.innerHeight - 12;
+    return Math.max(12, Math.min(clientY, lowerEdge));
+  }
+
   function reorderPriorityRowAtPointer(clientX, clientY) {
     if (!priorityPointerDrag) return;
-    const target = document.elementFromPoint(clientX, clientY)?.closest(".priority-row[data-priority-code]");
+    const hitY = priorityDragHitY(clientY);
+    const target = document.elementFromPoint(clientX, hitY)?.closest(".priority-row[data-priority-code]");
     const { row, list } = priorityPointerDrag;
     if (!target || target === row || target.parentElement !== list) return;
     const rect = target.getBoundingClientRect();
-    if (clientY < rect.top + rect.height / 2) list.insertBefore(row, target);
+    if (hitY < rect.top + rect.height / 2) list.insertBefore(row, target);
     else list.insertBefore(row, target.nextElementSibling);
     refreshPriorityRanksInPlace();
   }
 
-  function priorityDragAutoScroll() {
+  function priorityDragAutoScroll(timestamp) {
     if (!priorityPointerDrag) return;
-    const edge = Math.min(105, Math.max(70, window.innerHeight * 0.14));
-    const y = priorityPointerDrag.clientY;
-    let speed = 0;
-    if (y < edge) speed = -Math.ceil((edge - y) / 5);
-    else if (y > window.innerHeight - edge) speed = Math.ceil((y - (window.innerHeight - edge)) / 5);
-    speed = Math.max(-22, Math.min(22, speed));
-    if (speed) {
-      window.scrollBy(0, speed);
+    const drag = priorityPointerDrag;
+    const edge = Math.min(220, Math.max(145, window.innerHeight * 0.28));
+    const y = drag.clientY;
+    let direction = 0;
+    let intensity = 0;
+    if (y < edge) {
+      direction = -1;
+      intensity = Math.min(1, (edge - y) / edge);
+    } else if (y > window.innerHeight - edge) {
+      direction = 1;
+      intensity = Math.min(1, (y - (window.innerHeight - edge)) / edge);
+    }
+    const elapsed = drag.lastFrameTime ? Math.min(32, Math.max(8, timestamp - drag.lastFrameTime)) : 16;
+    drag.lastFrameTime = timestamp;
+    if (direction) {
+      const pixelsPerSecond = 1050 + (intensity * 2850);
+      const scrollingElement = document.scrollingElement || document.documentElement;
+      scrollingElement.scrollTop += direction * pixelsPerSecond * (elapsed / 1000);
       reorderPriorityRowAtPointer(priorityPointerDrag.clientX, priorityPointerDrag.clientY);
     }
-    priorityPointerDrag.raf = window.requestAnimationFrame(priorityDragAutoScroll);
+    drag.raf = window.requestAnimationFrame(priorityDragAutoScroll);
   }
 
-  function startPriorityPointerDrag(event, handle) {
-    if (state.role !== "manager" || !state.priorityEditing || priorityPointerDrag || event.button > 0) return;
-    const row = handle.closest(".priority-row[data-priority-code]");
+  function startPriorityPointerDrag(event, source) {
+    if (!canReorderPriority() || priorityPointerDrag || event.button > 0) return;
+    const row = source.closest(".priority-row[data-priority-code]");
     const list = row?.parentElement;
     if (!row || !list?.classList.contains("priority-list")) return;
     const rect = row.getBoundingClientRect();
@@ -3390,10 +3958,11 @@
     document.body.append(ghost);
     row.classList.add("priority-placeholder");
     document.body.classList.add("priority-is-dragging");
+    document.documentElement.classList.add("priority-is-dragging");
     state.priorityDragCode = row.dataset.priorityCode;
     priorityPointerDrag = {
       pointerId: event.pointerId,
-      handle,
+      source,
       row,
       list,
       ghost,
@@ -3401,14 +3970,60 @@
       clientX: event.clientX,
       clientY: event.clientY,
       originalOrder: [...state.settings.priorityOrder],
+      autoSave: isMobilePriorityMode() && !state.priorityEditing,
+      lastFrameTime: 0,
       raf: 0,
     };
-    handle.setPointerCapture?.(event.pointerId);
+    source.setPointerCapture?.(event.pointerId);
     priorityPointerDrag.raf = window.requestAnimationFrame(priorityDragAutoScroll);
     event.preventDefault();
   }
 
+  function cancelPriorityPointerPress() {
+    if (!priorityPointerPress) return;
+    window.clearTimeout(priorityPointerPress.timer);
+    priorityPointerPress.source.classList.remove("priority-pressing");
+    priorityPointerPress = null;
+  }
+
+  function beginPriorityPointerPress(event, source) {
+    if (!canReorderPriority() || priorityPointerDrag || priorityPointerPress || event.button > 0) return;
+    if (!source.closest(".priority-row[data-priority-code]")) return;
+    if (event.pointerType === "mouse") {
+      startPriorityPointerDrag(event, source);
+      return;
+    }
+    source.classList.add("priority-pressing");
+    priorityPointerPress = {
+      pointerId: event.pointerId,
+      source,
+      startX: event.clientX,
+      startY: event.clientY,
+      clientX: event.clientX,
+      clientY: event.clientY,
+      timer: window.setTimeout(() => {
+        if (!priorityPointerPress || priorityPointerPress.pointerId !== event.pointerId) return;
+        const press = priorityPointerPress;
+        priorityPointerPress = null;
+        press.source.classList.remove("priority-pressing");
+        startPriorityPointerDrag({
+          pointerId: press.pointerId,
+          pointerType: event.pointerType,
+          button: 0,
+          clientX: press.clientX,
+          clientY: press.clientY,
+          preventDefault() {},
+        }, press.source);
+      }, 180),
+    };
+  }
+
   function updatePriorityPointerDrag(event) {
+    if (priorityPointerPress && event.pointerId === priorityPointerPress.pointerId) {
+      priorityPointerPress.clientX = event.clientX;
+      priorityPointerPress.clientY = event.clientY;
+      if (Math.hypot(event.clientX - priorityPointerPress.startX, event.clientY - priorityPointerPress.startY) > 16) cancelPriorityPointerPress();
+    }
     if (!priorityPointerDrag || event.pointerId !== priorityPointerDrag.pointerId) return;
     priorityPointerDrag.clientX = event.clientX;
     priorityPointerDrag.clientY = event.clientY;
@@ -3421,17 +4036,23 @@
     if (!priorityPointerDrag) return;
     const drag = priorityPointerDrag;
     window.cancelAnimationFrame(drag.raf);
-    try { drag.handle.releasePointerCapture?.(drag.pointerId); } catch (_) { /* Pointer capture can already be released by iOS. */ }
+    try { drag.source.releasePointerCapture?.(drag.pointerId); } catch (_) { /* Pointer capture can already be released by iOS. */ }
     const order = cancelled
       ? drag.originalOrder
       : [...drag.list.querySelectorAll(".priority-row[data-priority-code]")].map((row) => row.dataset.priorityCode);
     drag.ghost.remove();
     drag.row.classList.remove("priority-placeholder");
     document.body.classList.remove("priority-is-dragging");
+    document.documentElement.classList.remove("priority-is-dragging");
     priorityPointerDrag = null;
     state.priorityDragCode = "";
     state.settings.priorityOrder = order;
     syncSchedulingPolicy();
+    const changed = order.some((code, index) => code !== drag.originalOrder[index]);
+    if (!cancelled && drag.autoSave && changed) {
+      saveSchedulingPolicy({ revertOrder: drag.originalOrder, successMessage: "Priority order saved." });
+      return;
+    }
     renderSchedulingPriority();
   }
 
@@ -3479,7 +4100,7 @@
     const mobileWorkingDays = scheduleWeekRows(state.settings.weekStart).filter((day) => !day.closed);
     const mobileDateFormatter = new Intl.DateTimeFormat("en-US", { month: "numeric", day: "numeric" });
     const mobileDayHeaders = mobileWorkingDays.map((day) => `<th scope="col"><strong>${escapeHtml(day.name.slice(0, 3))}</strong><small>${mobileDateFormatter.format(day.date)}</small></th>`).join("");
-    const mobileOverviewRows = state.team.map((employee) => `<tr><th scope="row"><strong>${escapeHtml(employee.name)}</strong><small>Priority ${employee.schedulePriority}${employee.weekendRequired ? " · weekend" : ""}</small></th>${demoData.days.map((day) => mobileAvailabilityOverviewCellMarkup(employee, day)).join("")}</tr>`).join("");
+    const mobileOverviewRows = state.team.map((employee) => `<tr><th scope="row"><strong>${escapeHtml(employee.name)}</strong><small>Priority ${employee.schedulePriority} · ${employee.weekendDaysRequired}/3 weekend</small></th>${demoData.days.map((day) => mobileAvailabilityOverviewCellMarkup(employee, day)).join("")}</tr>`).join("");
     const policyDayOptions = (selected, minimum = 0) => Array.from({ length: 7 - minimum }, (_, optionIndex) => optionIndex + minimum)
       .map((value) => `<option value="${value}" ${value === selected ? "selected" : ""}>${value}</option>`).join("");
     const availabilityEditor = selectedMobileEmployee ? `<details class="availability-employee-editor" open>
@@ -3495,8 +4116,8 @@
             <div class="manager-rule-grid">
               <label><span>Minimum days</span><select data-policy-min="${escapeHtml(selectedMobileEmployee.code)}">${policyDayOptions(selectedMobileEmployee.minShifts)}</select></label>
               <label><span>Maximum days</span><select data-policy-max="${escapeHtml(selectedMobileEmployee.code)}">${policyDayOptions(selectedMobileEmployee.maxShifts, 1)}</select></label>
-              <label><span>Weekdays to offer</span><select data-policy-weekdays="${escapeHtml(selectedMobileEmployee.code)}">${Array.from({ length: 5 }, (_, value) => `<option value="${value}" ${value === selectedMobileEmployee.weekdayRequirement ? "selected" : ""}>${value}</option>`).join("")}</select></label>
-              <label class="manager-weekend-rule"><input type="checkbox" data-policy-weekend="${escapeHtml(selectedMobileEmployee.code)}" ${selectedMobileEmployee.weekendRequired ? "checked" : ""}><span><strong>Weekend availability</strong><small>Must offer Saturday or Sunday</small></span></label>
+              <label><span>Weekdays to offer</span><select data-policy-weekdays="${escapeHtml(selectedMobileEmployee.code)}">${Array.from({ length: 4 }, (_, value) => `<option value="${value}" ${value === selectedMobileEmployee.weekdayRequirement ? "selected" : ""}>${value}/3</option>`).join("")}</select></label>
+              <label class="manager-weekend-days-rule"><span>Weekend days to offer</span><select data-policy-weekend-days="${escapeHtml(selectedMobileEmployee.code)}">${Array.from({ length: 3 }, (_, value) => `<option value="${value}" ${value === selectedMobileEmployee.weekendDaysRequired ? "selected" : ""}>${value}/3</option>`).join("")}</select><small>Friday · Saturday · Sunday</small></label>
             </div>
           </section>
           <div class="mobile-availability-days">${demoData.days.map((day) => `<article class="mobile-availability-day"><header><strong>${day.name}</strong><small>${day.short}</small></header>${availabilityShiftCellMarkup(selectedMobileEmployee, day, "div")}</article>`).join("")}</div>
@@ -4232,7 +4853,7 @@
       </section>`;
   }
 
-  async function loadChatData() {
+  async function loadChatData({ ensureTeam = true } = {}) {
     if (state.mode === "demo") {
       const saved = loadDemoMessages();
       state.chatThreads = saved.threads;
@@ -4241,20 +4862,24 @@
       return;
     }
     if (!supabaseClient || !state.profile) return;
-    const ensured = await supabaseClient.rpc("ensure_team_chat");
-    if (ensured.error) {
-      state.messagesSetupMissing = /ensure_team_chat|chat_threads|schema cache|function|relation/i.test(ensured.error.message || "");
-      state.chatThreads = [];
-      state.chatMessages = [];
-      return;
+    if (ensureTeam) {
+      const ensured = await supabaseClient.rpc("ensure_team_chat");
+      if (ensured.error) {
+        state.messagesSetupMissing = /ensure_team_chat|chat_threads|schema cache|function|relation/i.test(ensured.error.message || "");
+        state.chatThreads = [];
+        state.chatMessages = [];
+        return;
+      }
     }
     const threadResult = await supabaseClient.from("chat_threads")
       .select("id, title, thread_type, created_by, created_at, updated_at, chat_members(employee_id)")
       .order("updated_at", { ascending: false });
     if (threadResult.error) {
-      state.messagesSetupMissing = true;
-      state.chatThreads = [];
-      state.chatMessages = [];
+      if (ensureTeam) {
+        state.messagesSetupMissing = true;
+        state.chatThreads = [];
+        state.chatMessages = [];
+      }
       return;
     }
     state.messagesSetupMissing = false;
@@ -4271,7 +4896,8 @@
       .select("id, thread_id, sender_id, body, created_at")
       .in("thread_id", threadIds)
       .order("created_at", { ascending: true });
-    state.chatMessages = messageResult.error ? [] : messageResult.data || [];
+    if (!messageResult.error) state.chatMessages = messageResult.data || [];
+    else if (ensureTeam) state.chatMessages = [];
   }
 
   async function openDirectChat(employeeId) {
@@ -4635,8 +5261,8 @@
     const employee = state.team.find((item) => item.id === form.dataset.employeeId);
     const draft = availabilityPreviewData(form);
     const availableDays = draft.days.filter((day) => day.maxHours > 0);
-    const weekdayAvailable = draft.days.filter((day) => ["Tuesday", "Wednesday", "Thursday", "Friday"].includes(day.name) && day.maxHours > 0).length;
-    const weekendAvailable = draft.days.some((day) => ["Saturday", "Sunday"].includes(day.name) && day.maxHours > 0);
+    const weekdayAvailable = draft.days.filter((day) => ["Tuesday", "Wednesday", "Thursday"].includes(day.name) && day.maxHours > 0).length;
+    const weekendAvailable = draft.days.filter((day) => ["Friday", "Saturday", "Sunday"].includes(day.name) && day.maxHours > 0).length;
     const dateFormatter = new Intl.DateTimeFormat("en-US", { month: "numeric", day: "numeric" });
     const byName = Object.fromEntries(draft.days.map((day) => [day.name, day]));
     const rows = scheduleWeekRows(state.settings.weekStart).map((day) => {
@@ -4645,9 +5271,11 @@
       const availability = byName[day.name];
       return `<tr class="${availability.maxHours ? "" : "unavailable-row"}"><th>${heading}</th><td>${availability.entries}<small class="availability-cell-note">${escapeHtml(availability.label)}</small></td></tr>`;
     }).join("");
-    const weekendStatus = employee?.weekendRequired
-      ? `<span class="${weekendAvailable ? "weekend-ready" : "weekend-missing"}"><strong>${weekendAvailable ? "✓" : "!"}</strong> ${weekendAvailable ? "Weekend offered" : "Weekend availability required"}</span>`
-      : `<span><strong>✓</strong> Standard availability rule</span>`;
+    const weekendRequired = Number(employee?.weekendDaysRequired || 0);
+    const weekendReady = weekendAvailable >= weekendRequired;
+    const weekendStatus = weekendRequired
+      ? `<span class="${weekendReady ? "weekend-ready" : "weekend-missing"}"><strong>${weekendReady ? "✓" : "!"}</strong> ${weekendAvailable}/3 offered · ${weekendRequired}/3 needed</span>`
+      : `<span><strong>✓</strong> 0/3 weekend required</span>`;
     const weekdayReady = weekdayAvailable >= Number(employee?.weekdayRequirement || 0);
     const weekdayStatus = employee?.weekdayRequirement
       ? `<span class="${weekdayReady ? "weekend-ready" : "weekend-missing"}"><strong>${weekdayReady ? "✓" : "!"}</strong> ${weekdayAvailable}/${employee.weekdayRequirement} weekdays</span>`
@@ -4694,8 +5322,8 @@
     const deadlinePassed = Date.now() > deadline.getTime();
     const requestType = employee.requestType || "weekly_availability";
     const requestTypeOption = (value) => `<option value="${value}" ${requestType === value ? "selected" : ""}>${requestTypeLabels[value]}</option>`;
-    const availabilityRule = employee.weekendRequired || employee.weekdayRequirement
-      ? `<section class="panel weekend-requirement-card"><span class="weekend-rule-icon" aria-hidden="true">✓</span><div><p class="eyebrow">Availability needed</p><h3>${employee.weekdayRequirement ? `Offer ${employee.weekdayRequirement} weekday${employee.weekdayRequirement === 1 ? "" : "s"}` : "Weekday availability is flexible"}${employee.weekendRequired ? " + one weekend day" : ""}</h3><p>Choose at least one morning or night shift on each day you offer. These are availability requirements—not guaranteed shifts.</p></div></section>`
+    const availabilityRule = employee.weekendDaysRequired || employee.weekdayRequirement
+      ? `<section class="panel weekend-requirement-card"><span class="weekend-rule-icon" aria-hidden="true">✓</span><div><p class="eyebrow">Availability needed</p><h3>${employee.weekdayRequirement ? `Offer ${employee.weekdayRequirement}/3 weekdays` : "Weekday availability is flexible"}${employee.weekendDaysRequired ? ` + ${employee.weekendDaysRequired}/3 weekend days` : ""}</h3><p>At Swensen’s, weekend means Friday, Saturday, and Sunday. Choose at least one morning or night shift on each day you offer. These are availability requirements—not guaranteed shifts.</p></div></section>`
       : "";
 
     return `<form id="requestForm" data-employee-id="${employee.id}" class="request-form">
@@ -4813,18 +5441,18 @@
       if (formData.get(`double-${day.name}`)) willingDouble.push(day.name);
     });
     const requestType = String(formData.get("requestType") || "weekly_availability");
-    const offersWeekend = ["Saturday", "Sunday"].some((day) =>
+    const weekendDaysOffered = ["Friday", "Saturday", "Sunday"].filter((day) =>
       availability[day]?.AM !== "unavailable" || availability[day]?.PM !== "unavailable"
-    );
-    const weekdaysOffered = ["Tuesday", "Wednesday", "Thursday", "Friday"].filter((day) =>
+    ).length;
+    const weekdaysOffered = ["Tuesday", "Wednesday", "Thursday"].filter((day) =>
       availability[day]?.AM !== "unavailable" || availability[day]?.PM !== "unavailable"
     ).length;
     if (requestType !== "call_off" && weekdaysOffered < Number(employee.weekdayRequirement || 0)) {
       showToast(`Please offer at least ${employee.weekdayRequirement} weekday${employee.weekdayRequirement === 1 ? "" : "s"} before submitting.`);
       return;
     }
-    if (employee.weekendRequired && requestType !== "call_off" && !offersWeekend) {
-      showToast("Please offer at least one Saturday or Sunday shift before submitting.");
+    if (requestType !== "call_off" && weekendDaysOffered < Number(employee.weekendDaysRequired || 0)) {
+      showToast(`Please offer at least ${employee.weekendDaysRequired}/3 weekend days (Friday–Sunday) before submitting.`);
       return;
     }
     const submittedAt = new Date().toISOString();
@@ -5213,7 +5841,7 @@
       assignments: assignments.filter((assignment) => assignment.schedule_id === schedule.id),
     }));
     if (state.selectedScheduleRecordId && !findScheduleRecord(state.selectedScheduleRecordId)) state.selectedScheduleRecordId = "";
-    if (state.scheduleModuleView === "records") renderScheduleRecords();
+    if (state.role === "manager") renderRecords();
   }
 
   async function loadSupabaseApp(session) {
@@ -5260,7 +5888,11 @@
         minShifts: Number.isFinite(Number(employee.min_shifts)) ? Number(employee.min_shifts) : recurring?.minShifts ?? 2,
         maxShifts: Number.isFinite(Number(employee.max_shifts)) ? Number(employee.max_shifts) : recurring?.maxShifts ?? 4,
         weekdayRequirement: Number.isFinite(Number(employee.weekday_days_required)) ? Number(employee.weekday_days_required) : recurring?.weekdayRequirement ?? 2,
-        weekendRequired: typeof employee.weekend_required === "boolean" ? employee.weekend_required : recurring?.weekendRequired,
+        weekendDaysRequired: Number.isFinite(Number(employee.weekend_days_required))
+          ? Number(employee.weekend_days_required)
+          : typeof employee.weekend_required === "boolean"
+            ? (employee.weekend_required ? 1 : 0)
+            : Number(recurring?.weekendDaysRequired ?? (recurring?.weekendRequired ? 1 : 0)),
         skills: employee.employee_skills.map((row) => row.skill),
         submitted: Boolean(recurring),
         willingDouble: clone(baseWillingDouble),
@@ -5425,7 +6057,7 @@
     const previewView = new URLSearchParams(window.location.search).get("preview");
     const previewHost = window.location.hostname === "terminal.local" || window.location.hostname.endsWith(".chatgpt.site");
     const employeePreviewViews = new Set(["employee", "employee-requests", "employee-availability", "employee-contacts", "employee-messages", "it"]);
-    const previewMode = previewHost && ["schedule", "priority", "records", "employee", "employee-requests", "employee-availability", "employee-contacts", "employee-messages", "messages", "inventory", "team", "reports", "it"].includes(previewView);
+    const previewMode = previewHost && ["home", "schedule", "priority", "schedule-records", "records", "employee", "employee-requests", "employee-availability", "employee-contacts", "employee-messages", "messages", "inventory", "team", "reports", "it"].includes(previewView);
     if (previewMode) {
       state.mode = "demo";
       const previewByCode = new Map(demoData.team.map((employee) => [employee.code, clone(employee)]));
@@ -5443,7 +6075,7 @@
         .filter((employee) => !activeSeniorityCodes.has(employee.code))
         .map((employee) => ({ ...employee, active: false, hasLogin: true }))
         .sort((a, b) => a.name.localeCompare(b.name));
-      state.scheduleModuleView = previewView === "priority" ? "priority" : previewView === "records" ? "records" : "availability";
+      state.scheduleModuleView = previewView === "priority" ? "priority" : "availability";
       const previewSchedules = scheduler.generateOptions(state.team, state.settings, 2);
       state.scheduleHistory = previewSchedules.map((option, index) => {
         const week = new Date(`${state.settings.weekStart}T12:00:00`);
@@ -5466,7 +6098,7 @@
           published_at: savedAt,
         };
       });
-      if (previewView === "inventory" || previewView === "reports") loadInventoryPreviewData();
+      if (["home", "team", "inventory", "records", "schedule-records", "reports"].includes(previewView)) loadInventoryPreviewData();
       if (previewView === "team" && !state.emergencyContacts["demo-paul"]) {
         state.emergencyContacts["demo-paul"] = { name: "Sample Contact", relationship: "Mother", phone: "(415) 555-0142" };
       }
@@ -5487,7 +6119,7 @@
       } else {
         openApp({ id: "preview-manager", employee_code: "SWENSENSMANAGER", display_name: "Manager Preview", account_role: "manager", skills: ["manager"] });
       }
-      navigate(previewView === "inventory" ? "inventory" : previewView === "reports" ? "reports" : previewView === "team" ? "home" : ["messages", "employee-messages"].includes(previewView) ? "messages" : "schedule");
+      navigate(["home", "team"].includes(previewView) ? "home" : previewView === "inventory" ? "inventory" : ["records", "schedule-records"].includes(previewView) ? "records" : previewView === "reports" ? "reports" : ["messages", "employee-messages"].includes(previewView) ? "messages" : "schedule");
       if (previewView === "team") document.querySelector("#homeTeamDrawer").open = true;
       if (previewView === "reports") loadInventoryReport();
       return;
@@ -5727,13 +6359,13 @@
     const viewScheduleRecordButton = event.target.closest("[data-view-schedule-record]");
     if (viewScheduleRecordButton) {
       state.selectedScheduleRecordId = viewScheduleRecordButton.dataset.viewScheduleRecord;
-      renderScheduleRecords();
+      renderRecords();
       window.setTimeout(() => document.querySelector("#selectedScheduleRecord")?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
       return;
     }
     if (event.target.closest("[data-close-schedule-record]")) {
       state.selectedScheduleRecordId = "";
-      renderScheduleRecords();
+      renderRecords();
       return;
     }
     const printScheduleRecordButton = event.target.closest("[data-print-schedule-record]");
@@ -5754,6 +6386,7 @@
       }
       navigate(navButton.dataset.nav);
       if (navButton.dataset.nav === "messages") renderMessages();
+      if (state.role === "manager" && navButton.dataset.nav === "records") renderRecords();
       if (state.role === "manager" && navButton.dataset.nav === "reports" && !state.reportData && !state.reportLoading) loadInventoryReport();
     }
 
@@ -5870,6 +6503,7 @@
       state.productionSheetViewId = viewProductionSheet.dataset.viewProductionSheet;
       state.inventoryMasterView = "can";
       renderInventory();
+      navigate("inventory");
       document.querySelector(".inventory-master-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
       return;
     }
@@ -5976,14 +6610,29 @@
 
   document.addEventListener("pointerdown", (event) => {
     const handle = event.target.closest("[data-priority-drag-handle]");
-    if (handle) startPriorityPointerDrag(event, handle);
+    if (handle) {
+      startPriorityPointerDrag(event, handle);
+      return;
+    }
+    const source = event.target.closest("[data-priority-drag-source]");
+    if (source) beginPriorityPointerPress(event, source);
+  });
+  document.addEventListener("contextmenu", (event) => {
+    if (isMobilePriorityMode() && event.target.closest("[data-priority-drag-source]")) event.preventDefault();
   });
   document.addEventListener("pointermove", updatePriorityPointerDrag, { passive: false });
   document.addEventListener("pointerup", (event) => {
+    if (priorityPointerPress && event.pointerId === priorityPointerPress.pointerId) cancelPriorityPointerPress();
     if (priorityPointerDrag && event.pointerId === priorityPointerDrag.pointerId) finishPriorityPointerDrag(false);
   });
   document.addEventListener("pointercancel", (event) => {
+    if (priorityPointerPress && event.pointerId === priorityPointerPress.pointerId) cancelPriorityPointerPress();
     if (priorityPointerDrag && event.pointerId === priorityPointerDrag.pointerId) finishPriorityPointerDrag(true);
+  });
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden || state.mode !== "supabase") return;
+    refreshChatData();
+    refreshInventoryData();
   });
   document.addEventListener("keydown", (event) => {
     const handle = event.target.closest("[data-priority-drag-handle][data-priority-code]");
@@ -6007,7 +6656,7 @@
       if (note) note.textContent = state.shiftChangeType === "call_off" ? "This sends an urgent in-app manager alert. Also call the store if the shift is soon." : "A manager must approve any final coverage or swap.";
       return;
     }
-    const policyCode = event.target.dataset.policyMin || event.target.dataset.policyMax || event.target.dataset.policyWeekdays || event.target.dataset.policyWeekend;
+    const policyCode = event.target.dataset.policyMin || event.target.dataset.policyMax || event.target.dataset.policyWeekdays || event.target.dataset.policyWeekendDays;
     if (policyCode && state.role === "manager") {
       const employee = state.team.find((item) => item.code === policyCode);
       if (!employee) return;
@@ -6020,7 +6669,10 @@
         if (employee.minShifts > employee.maxShifts) employee.minShifts = employee.maxShifts;
       }
       if (event.target.matches("[data-policy-weekdays]")) employee.weekdayRequirement = Number(event.target.value);
-      if (event.target.matches("[data-policy-weekend]")) employee.weekendRequired = event.target.checked;
+      if (event.target.matches("[data-policy-weekend-days]")) {
+        employee.weekendDaysRequired = Number(event.target.value);
+        employee.weekendRequired = employee.weekendDaysRequired > 0;
+      }
       renderAvailabilityMatrix();
       return;
     }
